@@ -1,0 +1,27 @@
+{
+  "name": "folio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Folio: a character-first AI chat app with durable long-term memory and bring-your-own-model providers.",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --no-warnings --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/hanken-grotesk": "*",
+    "@fontsource-variable/newsreader": "*",
+    "@vitejs/plugin-react": "*",
+    "lucide-react": "*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0",
+    "vite": "*"
+  }
+}
