@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Navigate, useParams } from 'react-router-dom';
 import { Download, Pencil, Plus, Trash2, Upload, Zap } from 'lucide-react';
 import { useApp } from '../store.jsx';
-import { api, download, uploadJson } from '../api.js';
+import { api, download, stream, uploadJson } from '../api.js';
 import { Dialog, ErrorNotice, Field, Notice, Toggle, useConfirm, useToast } from '../ui.jsx';
 import { bytes, hostScope } from '../lib.js';
 
@@ -11,6 +11,7 @@ const SECTIONS = [
   ['appearance', 'Appearance'],
   ['providers', 'AI providers'],
   ['memory', 'Memory'],
+  ['portraits', 'Portraits'],
   ['data', 'Data and privacy'],
 ];
 
@@ -32,6 +33,7 @@ export default function Settings() {
           {section === 'appearance' && <Appearance />}
           {section === 'providers' && <Providers />}
           {section === 'memory' && <MemorySettings />}
+          {section === 'portraits' && <PortraitSettings />}
           {section === 'data' && <DataSettings />}
         </div>
       </div>
@@ -109,10 +111,162 @@ function General() {
           </select>
         </Row>
       </div>
+      <Account />
       <div className="group">
         <h3>About</h3>
         <p>Folio {version}. A local app: your characters, chats and memories live on this computer.</p>
         {dataInfo && <p className="hint mono" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>{dataInfo.path}</p>}
+      </div>
+    </>
+  );
+}
+
+function Account() {
+  const { auth, signOut } = useApp();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/auth/password', { current: cur, next });
+      toast.info('Password changed. Other devices were signed out.');
+      setOpen(false);
+      setCur('');
+      setNext('');
+    } catch (err) {
+      setError(err);
+    }
+    setBusy(false);
+  }
+  return (
+    <div className="group">
+      <h3>Account</h3>
+      <p>Signed in as <strong>{auth?.user}</strong>.</p>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <button className="btn sm" onClick={() => setOpen((v) => !v)}>Change password</button>
+        <button className="btn sm" onClick={signOut}>Sign out</button>
+      </div>
+      {open && (
+        <form onSubmit={submit} style={{ marginTop: 14, maxWidth: 320, display: 'grid', gap: 10 }}>
+          <Field label="Current password" htmlFor="pw-cur"><input id="pw-cur" className="input" type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} required /></Field>
+          <Field label="New password" htmlFor="pw-new" hint="At least 8 characters."><input id="pw-new" className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} required /></Field>
+          {error && <ErrorNotice error={error} />}
+          <div><button className="btn primary sm" type="submit" disabled={busy || !cur || !next}>Save password</button></div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ portraits */
+
+function PortraitSettings() {
+  const toast = useToast();
+  const [cfg, setCfg] = useState(null);
+  const [f, setF] = useState(null);
+  const [key, setKey] = useState('');
+  const [err, setErr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [test, setTest] = useState({ busy: false, msg: '', img: null, error: null });
+  const ctl = useRef(null);
+  useEffect(() => () => ctl.current?.abort(), []);
+  useEffect(() => {
+    api.get('/images/config').then((c) => { setCfg(c); setF({ provider: c.provider, baseUrl: c.baseUrl, model: c.model, size: c.size, remoteAck: c.remoteAck }); }).catch(setErr);
+  }, []);
+  if (err) return <ErrorNotice error={err} />;
+  if (!cfg || !f) return <p className="muted" role="status">Loading…</p>;
+  const info = cfg.providers.find((p) => p.type === f.provider);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const remote = f.provider === 'openai' && hostScope(f.baseUrl || cfg.defaults.openai) === 'remote';
+
+  async function save(extra = {}) {
+    setSaving(true);
+    setErr(null);
+    try {
+      const c = await api.put('/images/config', { ...f, ...(key.trim() ? { apiKey: key.trim() } : {}), ...extra });
+      setCfg(c);
+      setKey('');
+      toast.info('Portrait settings saved.');
+      return true;
+    } catch (e) {
+      setErr(e);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runTest() {
+    if (!(await save())) return;
+    setTest({ busy: true, msg: 'Starting…', img: null, error: null });
+    ctl.current = new AbortController();
+    let img = null;
+    let error = null;
+    try {
+      await stream('/images/portraits', { prompt: 'friendly lighthouse keeper with a grey beard and a yellow raincoat', style: 'illustration', count: 1 }, {
+        signal: ctl.current.signal,
+        onEvent: (ev, d) => {
+          if (ev === 'progress') setTest((t) => ({ ...t, msg: d.message }));
+          if (ev === 'image') img = d.dataUrl;
+          if (ev === 'error') error = d;
+        },
+      });
+    } catch (e) {
+      if (e.code !== 'aborted') error = e;
+    }
+    setTest({ busy: false, msg: '', img, error });
+  }
+
+  return (
+    <>
+      <h2>Portraits</h2>
+      <p className="lead">Which service draws character portraits when you press “Generate portrait” in the character editor.</p>
+      <div className="group">
+        <Field label="Image service" htmlFor="im-prov">
+          <select id="im-prov" className="select" style={{ maxWidth: 360 }} value={f.provider} onChange={(e) => set('provider', e.target.value)}>
+            {cfg.providers.map((p) => <option key={p.type} value={p.type}>{p.label}</option>)}
+          </select>
+        </Field>
+        <Notice kind="info" title={info.label}>{info.note}</Notice>
+        {info.fields.includes('baseUrl') && (
+          <Field label="API base URL" htmlFor="im-url" hint="Ends in /v1 for OpenAI-style servers.">
+            <input id="im-url" className="input" value={f.baseUrl} onChange={(e) => set('baseUrl', e.target.value)} placeholder={cfg.defaults.openai} />
+          </Field>
+        )}
+        {info.fields.includes('key') && (
+          <Field label={`API key${info.needsKey ? '' : ' (optional)'}`} htmlFor="im-key" hint={cfg.hasKey && !key ? `A key ending in ${cfg.keyHint.slice(-4)} is stored encrypted. Leave blank to keep it. ${info.keyHelp}` : info.keyHelp}>
+            <div className="cluster">
+              <input id="im-key" className="input" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={cfg.hasKey ? '••••••••' : ''} />
+              {cfg.hasKey && <button className="btn sm" onClick={() => save({ clearKey: true })}>Remove key</button>}
+            </div>
+          </Field>
+        )}
+        {info.fields.includes('model') && (
+          <Field label="Model (optional)" htmlFor="im-model" hint="Leave empty to let the service choose.">
+            <input id="im-model" className="input" value={f.model} onChange={(e) => set('model', e.target.value)} />
+          </Field>
+        )}
+        {info.fields.includes('size') && (
+          <Field label="Image size (optional)" htmlFor="im-size" hint="For example 1024x1024. Empty uses 1024x1024.">
+            <input id="im-size" className="input" style={{ maxWidth: 160 }} value={f.size} onChange={(e) => set('size', e.target.value)} placeholder="1024x1024" />
+          </Field>
+        )}
+        {remote && <Toggle label="Send portrait descriptions to this service" hint="This endpoint is on the internet. Only the image description is sent, never your chats." checked={f.remoteAck} onChange={(v) => set('remoteAck', v)} />}
+        <ErrorNotice error={err} />
+        <div className="cluster wrap" style={{ marginTop: 10 }}>
+          <button className="btn primary" onClick={() => save()} disabled={saving || test.busy}>Save</button>
+          <button className="btn" onClick={runTest} disabled={saving || test.busy}>{test.busy ? 'Drawing…' : 'Save and make a test image'}</button>
+          {test.busy && <button className="btn ghost" onClick={() => ctl.current?.abort()}>Cancel</button>}
+        </div>
+        {test.busy && <p className="muted" role="status" style={{ marginTop: 8 }}>{test.msg}</p>}
+        <ErrorNotice error={test.error} />
+        {test.img && <img src={test.img} alt="Test portrait" style={{ width: 160, height: 160, objectFit: 'cover', borderRadius: 12, marginTop: 12 }} />}
       </div>
     </>
   );

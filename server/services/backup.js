@@ -1,12 +1,12 @@
 import fs from 'node:fs';
-import { q, tx, db, DB_PATH } from '../db.js';
+import { q, tx, dbFile } from '../db.js';
 import { bad, now } from '../util.js';
 import { VERSION } from '../config.js';
 
 const TABLES = ['providers', 'characters', 'conversations', 'messages', 'memories', 'summaries'];
 const SECRET_COLUMNS = { providers: ['api_key_enc', 'headers_enc'] };
 
-const columnsOf = (table) => db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name).filter((n) => n !== 'rid');
+const columnsOf = (table) => q.all(`PRAGMA table_info(${table})`).map((c) => c.name).filter((n) => n !== 'rid');
 
 /** Full backup. API keys and custom header values are deliberately left out of the file. */
 export function exportAll() {
@@ -24,12 +24,12 @@ export function dataInfo() {
   const count = (t) => q.get(`SELECT COUNT(*) AS n FROM ${t}`).n;
   let size = 0;
   try {
-    size = fs.statSync(DB_PATH).size;
+    size = fs.statSync(dbFile()).size;
   } catch {
     /* ignore */
   }
   return {
-    path: DB_PATH,
+    path: dbFile(),
     sizeBytes: size,
     counts: Object.fromEntries(TABLES.map((t) => [t, count(t)])),
   };

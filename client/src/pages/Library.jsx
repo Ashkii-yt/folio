@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Copy, Download, MessageCircle, Pencil, Pin, Plus, Search, Trash2, Upload, Brain } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Copy, Download, MessageCircle, Pencil, Pin, Plus, Search, Trash2, Upload, Brain, Share2 } from 'lucide-react';
 import { useApp } from '../store.jsx';
 import { api, download, uploadJson } from '../api.js';
+import SharedBrowser from '../components/SharedBrowser.jsx';
 import { Avatar, Empty, useConfirm, useToast } from '../ui.jsx';
 
 export default function Library({ mode }) {
@@ -15,6 +16,47 @@ export default function Library({ mode }) {
   const [tag, setTag] = useState('');
   const [sort, setSort] = useState(mode === 'browse' ? 'recent' : 'name');
   const mine = mode === 'mine';
+  const [params, setParams] = useSearchParams();
+  const sharedTab = !mine && params.get('tab') === 'shared';
+  const [sharedMap, setSharedMap] = useState({});
+  const loadShared = useCallback(async () => {
+    try { setSharedMap(await api.get('/shared/mine')); } catch { /* sharing info is optional here */ }
+  }, []);
+  useEffect(() => { loadShared(); }, [loadShared]);
+
+  const share = async (c) => {
+    const was = sharedMap[c.id];
+    if (!was) {
+      const ok = await confirm({
+        title: `Share ${c.name}?`,
+        message: (
+          <>
+            Everyone with an account on this server will be able to read the card and add their own copy. Your username is shown as the author.
+            <div className="hint" style={{ marginTop: 8 }}>Shared: name, description, tags, portrait, personality, background, style, goals, greeting, example dialogue and the system prompt addition. Never shared: your chats, memories, model settings and API keys.</div>
+          </>
+        ),
+        confirmLabel: 'Share character',
+        danger: false,
+      });
+      if (!ok) return;
+    }
+    try {
+      await api.post(`/characters/${c.id}/share`);
+      await loadShared();
+      toast.info(was ? `Updated the shared copy of ${c.name}.` : `${c.name} is now shared.`);
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+  const unshare = async (c) => {
+    try {
+      await api.del(`/characters/${c.id}/share`);
+      await loadShared();
+      toast.info(`${c.name} is no longer shared. People who already added it keep their copies.`);
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
 
   const tags = useMemo(() => {
     const n = new Map();
@@ -88,7 +130,15 @@ export default function Library({ mode }) {
           <Link to="/characters/new" className="btn primary"><Plus size={16} aria-hidden="true" /> Make a character</Link>
         </div>
 
-        {characters.length > 0 && (
+        {!mine && (
+          <div className="seg" role="group" aria-label="Which characters">
+            <button aria-pressed={!sharedTab} onClick={() => setParams({})}>Yours</button>
+            <button aria-pressed={sharedTab} onClick={() => setParams({ tab: 'shared' })}>Shared by others</button>
+          </div>
+        )}
+        {sharedTab && <SharedBrowser />}
+
+        {!sharedTab && characters.length > 0 && (
           <div className="cluster wrap" style={{ marginBottom: 14 }}>
             <div className="search grow" style={{ maxWidth: 360 }}>
               <Search size={16} aria-hidden="true" />
@@ -109,7 +159,7 @@ export default function Library({ mode }) {
           </div>
         )}
 
-        {characters.length === 0 ? (
+        {sharedTab ? null : characters.length === 0 ? (
           <Empty
             title="Nobody here yet"
             actions={
@@ -136,6 +186,11 @@ export default function Library({ mode }) {
                   <h2 className="name">{c.name}</h2>
                   <p className="desc clamp-2">{c.description || 'No description yet.'}</p>
                   {c.tags.length > 0 && <div className="tags">{c.tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
+                  {(c.origin || (mine && sharedMap[c.id])) && (
+                    <div className="by">
+                      {c.origin ? `From ${c.origin.owner}` : ''}{c.origin && mine && sharedMap[c.id] ? ' · ' : ''}{mine && sharedMap[c.id] ? (c.updatedAt > sharedMap[c.id].updatedAt ? 'Shared (edited since)' : 'Shared') : ''}
+                    </div>
+                  )}
                   <div className="acts">
                     <Link to={`/chat/${c.id}`} className="btn sm primary"><MessageCircle size={14} aria-hidden="true" /> Chat</Link>
                     {mine && (
@@ -143,6 +198,14 @@ export default function Library({ mode }) {
                         <Link to={`/characters/${c.id}/edit`} className="btn sm"><Pencil size={14} aria-hidden="true" /> Edit</Link>
                         <Link to={`/characters/${c.id}/memory`} className="btn sm ghost" title="Memory"><Brain size={14} aria-hidden="true" /> {c.memoryCount}</Link>
                         <button className="btn sm ghost icon" title="Duplicate" aria-label={`Duplicate ${c.name}`} onClick={() => act(() => api.post(`/characters/${c.id}/duplicate`), `Duplicated ${c.name}.`)}><Copy size={14} /></button>
+                        {sharedMap[c.id] ? (
+                          <>
+                            {c.updatedAt > sharedMap[c.id].updatedAt && <button className="btn sm ghost" onClick={() => share(c)} title="Publish your latest edits"><Share2 size={14} aria-hidden="true" /> Update shared</button>}
+                            <button className="btn sm ghost" onClick={() => unshare(c)} title="Stop sharing">Unshare</button>
+                          </>
+                        ) : (
+                          <button className="btn sm ghost icon" title="Share with other users" aria-label={`Share ${c.name}`} onClick={() => share(c)}><Share2 size={14} /></button>
+                        )}
                         <button className="btn sm ghost icon" title="Export" aria-label={`Export ${c.name}`} onClick={() => download(`/characters/${c.id}/export`)}><Download size={14} /></button>
                         <button className="btn sm ghost icon" title="Delete" aria-label={`Delete ${c.name}`} onClick={() => remove(c)}><Trash2 size={14} /></button>
                       </>

@@ -22,6 +22,10 @@ import { retrieveMemories, retrieveExcerpts } from '../services/retrieval.js';
 import { runExtraction, flushExtraction } from '../services/extract.js';
 import { maybeSummarize } from '../services/summarize.js';
 import { generateReply, previewReply, previewPrompt } from '../services/chat.js';
+import { getImageConfig, setImageConfig, generatePortraits, writePortraitPrompt, STYLES } from '../services/images.js';
+import { suggestReplies } from '../services/suggest.js';
+import { designCharacter } from '../services/designer.js';
+import { listShared, getShared, getSharedAvatar, mySharedMap, publish, unpublish, unpublishShared, addShared } from '../shared.js';
 import { seedStarters } from '../services/starters.js';
 import { exportAll, restoreAll, wipe, dataInfo } from '../services/backup.js';
 import { streamJob } from './sse.js';
@@ -106,6 +110,74 @@ api.post('/characters/preview-chat', (req, res) =>
   })
 );
 
+api.post('/characters/generate', async (req, res) => {
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  const { idea, fields, current, providerId, model } = req.body || {};
+  try {
+    const result = await designCharacter({ idea, fields, current: current || {}, providerId, model, signal: ac.signal });
+    res.json({ fields: result });
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    if (e instanceof ProviderError) throw new HttpError(502, e.message, e.code || 'provider_error', { hint: e.hint });
+    throw e;
+  }
+});
+
+/* -------------------------------- portraits ------------------------------- */
+
+api.get('/images/config', (req, res) => res.json({ ...getImageConfig(), styles: Object.keys(STYLES) }));
+api.put('/images/config', (req, res) => res.json({ ...setImageConfig(req.body || {}), styles: Object.keys(STYLES) }));
+api.post('/images/prompt', async (req, res) => {
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  try {
+    const ch = { ...(req.body?.character || {}) };
+    if (!String(ch.name || '').trim()) delete ch.name;
+    res.json(await writePortraitPrompt(cleanCharacterInput(ch, { partial: true }), { signal: ac.signal }));
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    if (e instanceof ProviderError) throw new HttpError(502, e.message, e.code || 'provider_error', { hint: e.hint });
+    throw e;
+  }
+});
+api.post('/images/portraits', (req, res) =>
+  streamJob(req, res, async ({ emit, signal }) => {
+    const { prompt, style, count } = req.body || {};
+    const out = await generatePortraits({ prompt, style, count, signal, onProgress: (p) => emit('progress', p) });
+    emit('start', { provider: out.provider, prompt: out.prompt });
+    out.images.forEach((dataUrl, index) => emit('image', { index, dataUrl }));
+    emit('done', { count: out.images.length });
+  })
+);
+
+/* --------------------------------- sharing -------------------------------- */
+
+api.get('/shared', (req, res) => res.json(listShared({ search: req.query.search, tag: req.query.tag })));
+api.get('/shared/mine', (req, res) => res.json(mySharedMap()));
+api.get('/shared/:id', (req, res) => res.json(getShared(req.params.id)));
+api.get('/shared/:id/avatar', (req, res) => {
+  const a = getSharedAvatar(req.params.id);
+  if (!a) return res.status(404).end();
+  res.setHeader('Content-Type', a.mime);
+  res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+  res.setHeader('ETag', `"${a.version}"`);
+  res.send(a.data);
+});
+api.post('/shared/:id/add', (req, res) => res.status(201).json(addShared(req.params.id)));
+api.delete('/shared/:id', (req, res) => {
+  unpublishShared(req.params.id);
+  res.status(204).end();
+});
+api.post('/characters/:id/share', (req, res) => {
+  getCharacter(req.params.id);
+  res.json(publish(req.params.id));
+});
+api.delete('/characters/:id/share', (req, res) => {
+  unpublish(req.params.id);
+  res.status(204).end();
+});
+
 api.get('/characters/:id', (req, res) => res.json(getCharacter(req.params.id, { withAvatar: true })));
 api.patch('/characters/:id', (req, res) => res.json(updateCharacter(req.params.id, req.body)));
 api.delete('/characters/:id', (req, res) => {
@@ -175,6 +247,17 @@ api.post('/conversations/:id/messages', (req, res) => {
 });
 
 /** Regenerate the last reply (or retry after a failure, when the last message is the user's). */
+api.post('/conversations/:id/suggest-reply', async (req, res) => {
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  try {
+    res.json(await suggestReplies(req.params.id, { count: req.body?.count, signal: ac.signal }));
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    if (e instanceof ProviderError) throw new HttpError(502, e.message, e.code || 'provider_error', { hint: e.hint });
+    throw e;
+  }
+});
 api.post('/conversations/:id/regenerate', (req, res) => {
   const conv = getConversation(req.params.id);
   const last = conv.messages[conv.messages.length - 1];

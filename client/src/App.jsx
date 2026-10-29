@@ -1,5 +1,5 @@
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { Compass, Home as HomeIcon, Settings as SettingsIcon, Users } from 'lucide-react';
+import { Compass, LogOut, Home as HomeIcon, Settings as SettingsIcon, Users } from 'lucide-react';
 import { useApp } from './store.jsx';
 import { Avatar, Notice } from './ui.jsx';
 import Home from './pages/Home.jsx';
@@ -8,15 +8,16 @@ import Editor from './pages/Editor.jsx';
 import Chat from './pages/Chat.jsx';
 import MemoryPage from './pages/MemoryPage.jsx';
 import Settings from './pages/Settings.jsx';
+import AuthScreen from './pages/AuthScreen.jsx';
 
 function Rail() {
-  const { characters } = useApp();
+  const { characters, auth, signOut } = useApp();
   const loc = useLocation();
   const recent = [...characters].filter((c) => c.lastChatAt).sort((a, b) => b.lastChatAt.localeCompare(a.lastChatAt)).slice(0, 5);
-  const link = (to, Icon, label, extra) => (
+  const link = (to, Icon, label, extra, short) => (
     <NavLink to={to} end={to === '/'} className={({ isActive }) => `rail-link ${isActive ? 'active' : ''}`}>
       <Icon size={17} aria-hidden="true" />
-      {label}
+      {short ? <><span className="lbl-long">{label}</span><span className="lbl-short">{short}</span></> : label}
       {extra}
     </NavLink>
   );
@@ -27,8 +28,8 @@ function Rail() {
         Folio
       </div>
       {link('/', HomeIcon, 'Home')}
-      {link('/browse', Compass, 'Browse characters')}
-      {link('/mine', Users, 'My characters', characters.length ? <span className="count">{characters.length}</span> : null)}
+      {link('/browse', Compass, 'Browse characters', null, 'Browse')}
+      {link('/mine', Users, 'My characters', characters.length ? <span className="count">{characters.length}</span> : null, 'Mine')}
       {recent.length > 0 && <div className="rail-section">Recent chats</div>}
       {recent.map((c) => (
         <NavLink key={c.id} to={`/chat/${c.id}`} className={`rail-recent ${loc.pathname.startsWith(`/chat/${c.id}`) ? 'active' : ''}`}>
@@ -38,12 +39,20 @@ function Rail() {
       ))}
       <div className="rail-spacer" />
       {link('/settings', SettingsIcon, 'Settings')}
+      {auth?.user && (
+        <div className="rail-user">
+          <span className="clamp-1" title={auth.user}>{auth.user}</span>
+          <button className="btn ghost sm" onClick={signOut} aria-label={`Sign out ${auth.user}`} title="Sign out">
+            <LogOut size={15} aria-hidden="true" />
+          </button>
+        </div>
+      )}
     </nav>
   );
 }
 
 export default function App() {
-  const { ready, fatal, reload } = useApp();
+  const { ready, fatal, reload, auth } = useApp();
   if (fatal) {
     return (
       <div style={{ maxWidth: 520, margin: '12vh auto', padding: 20 }}>
@@ -53,6 +62,7 @@ export default function App() {
       </div>
     );
   }
+  if (auth && !auth.user) return <AuthScreen />;
   if (!ready) return <p className="muted" style={{ padding: 24 }} role="status">Loading…</p>;
   return (
     <div className="app">

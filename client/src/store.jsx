@@ -13,6 +13,7 @@ export function AppProvider({ children }) {
   const [boot, setBoot] = useState(null); // { settings, providers, providerTypes, categories, version, data }
   const [characters, setCharacters] = useState(null);
   const [fatal, setFatal] = useState(null);
+  const [auth, setAuth] = useState(null); // null = checking; { user, registrationOpen, firstRun, limitPerIp }
 
   const reload = useCallback(async () => {
     try {
@@ -24,6 +25,35 @@ export function AppProvider({ children }) {
       setFatal(e);
     }
   }, []);
+
+
+  const checkSession = useCallback(async () => {
+    try {
+      const a = await api.get('/auth/session');
+      setAuth(a);
+      setFatal(null);
+      return a;
+    } catch (e) {
+      setFatal(e);
+      return null;
+    }
+  }, []);
+
+  const signedIn = useCallback(async () => {
+    const a = await checkSession();
+    if (a?.user) await reload();
+  }, [checkSession, reload]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      /* ignore */
+    }
+    setBoot(null);
+    setCharacters(null);
+    await checkSession();
+  }, [checkSession]);
 
   const refreshCharacters = useCallback(async () => setCharacters(await api.get('/characters')), []);
   const refreshProviders = useCallback(async () => {
@@ -42,8 +72,18 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    signedIn();
+  }, [signedIn]);
+
+  useEffect(() => {
+    const out = () => {
+      setBoot(null);
+      setCharacters(null);
+      checkSession();
+    };
+    window.addEventListener('folio:signed-out', out);
+    return () => window.removeEventListener('folio:signed-out', out);
+  }, [checkSession]);
 
   // Theme: the server setting is the source of truth; localStorage only prevents a flash on load.
   const pref = boot?.settings?.theme;
@@ -71,6 +111,10 @@ export function AppProvider({ children }) {
 
   const value = useMemo(
     () => ({
+      auth,
+      signedIn,
+      signOut,
+      checkSession,
       ready: !!boot && !!characters,
       fatal,
       reload,
@@ -86,7 +130,7 @@ export function AppProvider({ children }) {
       refreshData,
       saveSettings,
     }),
-    [boot, characters, fatal, reload, refreshCharacters, refreshProviders, refreshData, saveSettings]
+    [auth, signedIn, signOut, checkSession, boot, characters, fatal, reload, refreshCharacters, refreshProviders, refreshData, saveSettings]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

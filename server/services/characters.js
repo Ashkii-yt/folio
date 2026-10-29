@@ -57,6 +57,7 @@ export function toCharacter(row, { withAvatar = false } = {}) {
     autoExtract: row.auto_extract == null ? null : !!row.auto_extract,
     hasAvatar: !!row.has_avatar || !!row.avatar,
     avatarVersion: row.updated_at,
+    origin: row.origin_shared_id ? { sharedId: row.origin_shared_id, owner: row.origin_owner } : null,
     lastChatAt: row.last_chat_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -73,7 +74,7 @@ export function toCharacter(row, { withAvatar = false } = {}) {
 const LIST_SQL = `
   SELECT c.id, c.name, c.description, c.personality, c.background, c.speaking_style, c.goals, c.example_dialogue,
          c.greeting, c.system_prompt_addition, c.tags, c.pinned, c.provider_id, c.model, c.memory_enabled,
-         c.auto_extract, c.last_chat_at, c.created_at, c.updated_at,
+         c.auto_extract, c.last_chat_at, c.created_at, c.updated_at, c.origin_shared_id, c.origin_owner,
          (c.avatar IS NOT NULL) AS has_avatar,
          (SELECT COUNT(*) FROM conversations v WHERE v.character_id = c.id) AS conversation_count,
          (SELECT COUNT(*) FROM memories m WHERE m.character_id = c.id AND m.status != 'superseded') AS memory_count,
@@ -159,18 +160,20 @@ const SQL_COLUMN = {
   memoryEnabled: 'memory_enabled', autoExtract: 'auto_extract', ...COLUMN,
 };
 
-export function createCharacter(input) {
+export function createCharacter(input, origin = null) {
   const c = cleanCharacterInput(input);
   const id = uid();
   const t = now();
   q.run(
     `INSERT INTO characters (id, name, description, personality, background, speaking_style, goals, example_dialogue,
-       greeting, system_prompt_addition, avatar, tags, pinned, provider_id, model, memory_enabled, auto_extract, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       greeting, system_prompt_addition, avatar, tags, pinned, provider_id, model, memory_enabled, auto_extract, created_at, updated_at,
+       origin_shared_id, origin_owner)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     id, c.name, c.description ?? '', c.personality ?? '', c.background ?? '', c.speakingStyle ?? '', c.goals ?? '',
     c.exampleDialogue ?? '', c.greeting ?? '', c.systemPromptAddition ?? '', c.avatar ?? null,
     JSON.stringify(c.tags ?? []), c.pinned ?? false, c.providerId ?? null, c.model ?? '',
-    c.memoryEnabled ?? true, c.autoExtract ?? null, t, t
+    c.memoryEnabled ?? true, c.autoExtract ?? null, t, t,
+    origin?.sharedId ?? null, origin?.owner ?? null
   );
   return getCharacter(id);
 }
@@ -210,7 +213,7 @@ export function duplicateCharacter(id) {
 
 export function exportCharacter(id) {
   const c = getCharacter(id, { withAvatar: true });
-  const { id: _i, createdAt, updatedAt, lastChatAt, conversationCount, memoryCount, messageCount, hasAvatar, avatarVersion, providerId, model, ...rest } = c;
+  const { id: _i, createdAt, updatedAt, lastChatAt, conversationCount, memoryCount, messageCount, hasAvatar, avatarVersion, providerId, model, origin, ...rest } = c;
   return { format: 'folio-character', version: 1, exportedAt: now(), character: rest };
 }
 

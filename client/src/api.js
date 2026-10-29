@@ -23,25 +23,33 @@ async function readError(res) {
   return new ApiError(e.message || `Request failed (HTTP ${res.status}).`, { code: e.code, hint: e.hint, status: res.status });
 }
 
-async function request(method, path, body) {
+async function checked(res) {
+  const e = await readError(res);
+  if (e.code === 'auth_required') window.dispatchEvent(new Event('folio:signed-out'));
+  return e;
+}
+
+async function request(method, path, body, signal) {
   let res;
   try {
     res = await fetch(`/api${path}`, {
       method,
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
     });
-  } catch {
+  } catch (e) {
+    if (e.name === 'AbortError') throw new ApiError('Cancelled.', { code: 'aborted' });
     throw OFFLINE;
   }
-  if (!res.ok) throw await readError(res);
+  if (!res.ok) throw await checked(res);
   if (res.status === 204) return null;
   return res.json();
 }
 
 export const api = {
   get: (p) => request('GET', p),
-  post: (p, b = {}) => request('POST', p, b),
+  post: (p, b = {}, o) => request('POST', p, b, o?.signal),
   patch: (p, b) => request('PATCH', p, b),
   put: (p, b) => request('PUT', p, b),
   del: (p) => request('DELETE', p),
@@ -64,7 +72,7 @@ export async function stream(path, body, { onEvent, signal } = {}) {
     if (e.name === 'AbortError') return;
     throw OFFLINE;
   }
-  if (!res.ok) throw await readError(res);
+  if (!res.ok) throw await checked(res);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';

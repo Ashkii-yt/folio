@@ -61,7 +61,7 @@ function startMock() {
 }
 
 async function startApp() {
-  app = spawn('node', ['--no-warnings', 'server/index.js'], { cwd: ROOT, env: { ...process.env, PORT: String(APP_PORT), FOLIO_DATA_DIR: DATA } });
+  app = spawn('node', ['--no-warnings', 'server/index.js'], { cwd: ROOT, env: { ...process.env, PORT: String(APP_PORT), FOLIO_DATA_DIR: DATA, FOLIO_MAX_ACCOUNTS_PER_IP: '0' } });
   for (let i = 0; i < 60; i++) {
     try {
       if ((await fetch(`http://127.0.0.1:${APP_PORT}/api/health`)).ok) return;
@@ -78,13 +78,19 @@ const stopApp = () =>
     app.kill('SIGTERM');
   });
 const url = (p) => `http://127.0.0.1:${APP_PORT}/api${p}`;
-const j = async (method, p, body) => {
-  const r = await fetch(url(p), { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+let cookie = '';
+async function signUp(username) {
+  const r = await fetch(url('/auth/register'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse battery' }) });
+  assert.equal(r.status, 201);
+  return r.headers.get('set-cookie').split(';')[0];
+}
+const j = async (method, p, body, ck = cookie) => {
+  const r = await fetch(url(p), { method, headers: { 'content-type': 'application/json', cookie: ck }, body: body && JSON.stringify(body) });
   const text = await r.text();
   return { status: r.status, body: text ? JSON.parse(text) : null };
 };
 async function sse(p, body) {
-  const r = await fetch(url(p), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const r = await fetch(url(p), { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body || {}) });
   const text = await r.text();
   return text
     .split('\n\n')
@@ -96,6 +102,7 @@ let charId, providerId, conv1;
 before(async () => {
   await startMock();
   await startApp();
+  cookie = await signUp('tester');
 });
 after(async () => {
   await stopApp();
@@ -113,7 +120,7 @@ test('provider: saved, key never returned, encrypted at rest, tested, models dis
   assert.equal(c.body.provider.hasKey, true);
   assert.ok(!JSON.stringify(c.body).includes('abcdef123456'));
   await j('GET', '/health');
-  assert.ok(!fs.readFileSync(path.join(DATA, 'folio.db')).includes('abcdef123456'), 'key must be encrypted at rest');
+  assert.ok(!fs.readFileSync(path.join(DATA, 'tester', 'folio.db')).includes('abcdef123456'), 'key must be encrypted at rest');
   const t = await j('POST', '/providers/test', { id: providerId });
   assert.equal(t.body.ok, true);
   assert.equal(t.body.models.length, 2);
@@ -266,6 +273,17 @@ test('long chat on a small context window: prompt stays inside budget, summaries
   assert.ok(last.messages.length < 27, 'not every old message was sent');
   assert.equal(last.messages.at(-1).content, 'And one more thing about the ferry.', 'the newest message is always sent');
   assert.match(JSON.stringify(last), /summaris/i, 'the summary stands in for what was dropped');
+});
+
+test('accounts are isolated: another user sees none of tester\'s data, and each has their own folder', async () => {
+  const other = await signUp('other-user');
+  assert.deepEqual((await j('GET', '/characters', undefined, other)).body, []);
+  assert.equal((await j('GET', `/characters/${charId}`, undefined, other)).status, 404);
+  assert.equal((await j('GET', `/conversations/${conv1}`, undefined, other)).status, 404);
+  assert.equal((await j('GET', '/providers', undefined, other)).body.length, 0);
+  assert.equal((await j('DELETE', `/characters/${charId}`, undefined, other)).status, 404);
+  assert.ok(fs.existsSync(path.join(DATA, 'other-user', 'folio.db')) && fs.existsSync(path.join(DATA, 'tester', 'folio.db')));
+  assert.ok((await j('GET', `/characters/${charId}`)).body.id === charId, "tester's own data is untouched");
 });
 
 test('backup excludes secrets and round-trips; deleting a character cascades; wipe needs confirmation', async () => {

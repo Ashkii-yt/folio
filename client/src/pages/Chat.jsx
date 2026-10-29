@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Brain, Check, Copy, Cpu, MessageSquarePlus, PanelLeft, PanelRight, Pencil, RefreshCw, Send, Square, Trash2, X } from 'lucide-react';
+import { Brain, Check, Copy, Cpu, MessageSquarePlus, PanelLeft, PanelRight, Pencil, RefreshCw, Send, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { useApp } from '../store.jsx';
 import { api, stream } from '../api.js';
 import { Avatar, ErrorNotice, Spinner, Styled, useConfirm, useToast, usePopover, Empty } from '../ui.jsx';
@@ -44,6 +44,8 @@ export default function Chat() {
   const [pending, setPending] = useState(null); // streaming reply: { text }
   const [error, setError] = useState(null);
   const [runInfo, setRunInfo] = useState(null); // { provider, model, source } from the latest start event
+  const [sugg, setSugg] = useState(null); // { items, loading, error }
+  const suggCtl = useRef(null);
   const [editing, setEditing] = useState(null); // { id, text }
   const [drawer, setDrawer] = useState(null); // null | 'memory' | 'details'
   const [convsOpen, setConvsOpen] = useState(() => window.matchMedia('(min-width: 1101px)').matches);
@@ -101,7 +103,30 @@ export default function Chat() {
     return () => { alive = false; };
   }, [conversationId, loadConversation]);
 
-  useEffect(() => () => ctl.current?.abort(), []);
+  useEffect(() => () => { ctl.current?.abort(); suggCtl.current?.abort(); }, []);
+
+  /* ---- suggest a reply: ideas for what to say next, written into the box only when you pick one ---- */
+  useEffect(() => {
+    suggCtl.current?.abort();
+    setSugg(null);
+  }, [conversationId, messages.length]);
+  async function suggest() {
+    if (!conv || busy || sugg?.loading) return;
+    suggCtl.current?.abort();
+    suggCtl.current = new AbortController();
+    setSugg((x) => ({ items: x?.items || [], loading: true, error: null }));
+    try {
+      const r = await api.post(`/conversations/${conv.id}/suggest-reply`, { count: 3 }, { signal: suggCtl.current.signal });
+      setSugg({ items: r.suggestions, loading: false, error: null });
+    } catch (e) {
+      if (e.code !== 'aborted') setSugg({ items: [], loading: false, error: e });
+    }
+  }
+  const pickSuggestion = (t) => {
+    setText(t);
+    setSugg(null);
+    requestAnimationFrame(() => { const ta = taRef.current; if (ta) { ta.focus(); ta.setSelectionRange(t.length, t.length); } });
+  };
 
   const refreshList = useCallback(async () => {
     try { setConvs(await api.get(`/characters/${characterId}/conversations`)); } catch { /* list stays as is */ }
@@ -362,6 +387,29 @@ export default function Chat() {
 
         <div className="composer-wrap">
           <div className="composer">
+            <div className="suggest">
+              {sugg && (sugg.items.length > 0 || sugg.error) ? (
+                <>
+                  <div className="suggest-head">
+                    <span>{sugg.error ? 'Could not suggest a reply' : 'Pick one to edit and send'}</span>
+                    <span className="grow" />
+                    {!sugg.error && <button className="btn sm ghost" onClick={suggest} disabled={sugg.loading}><RefreshCw size={13} aria-hidden="true" /> {sugg.loading ? 'Thinking…' : 'More ideas'}</button>}
+                    <button className="btn sm ghost icon" onClick={() => setSugg(null)} aria-label="Hide suggestions"><X size={14} /></button>
+                  </div>
+                  {sugg.error ? (
+                    <ErrorNotice error={sugg.error} action={<button className="btn sm" onClick={suggest}>Try again</button>} />
+                  ) : (
+                    <ul className="suggest-list">
+                      {sugg.items.map((t, i) => (<li key={i}><button onClick={() => pickSuggestion(t)}><Styled text={t} /></button></li>))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <button className="btn sm ghost" onClick={suggest} disabled={!conv || busy || sugg?.loading} title="Ideas for what to say next. Nothing is sent until you choose one and press Send.">
+                  {sugg?.loading ? <span className="spin" aria-hidden="true" /> : <Sparkles size={14} aria-hidden="true" />} {sugg?.loading ? 'Thinking…' : 'Suggest a reply'}
+                </button>
+              )}
+            </div>
             <div className="composer-box">
               <textarea
                 ref={taRef}

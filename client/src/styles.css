@@ -1725,3 +1725,339 @@ button.chip:hover {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---- accounts ---- */
+.rail-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px 4px;
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--ink-2, var(--muted));
+}
+.auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: grid;
+  gap: 14px;
+}
+.auth-card h1 {
+  font-family: 'Newsreader Variable', serif;
+  font-size: 1.9rem;
+  font-weight: 560;
+  margin: 8px 0 0;
+}
+
+/* ---- AI character creation ---- */
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+.label-row > label,
+.label-row > h2 {
+  font-weight: 600;
+  font-size: 0.93em;
+  min-width: 0;
+}
+.prompt-block .label-row > h2 {
+  font-size: 1.05em;
+}
+.ai-btn {
+  flex: none;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.ai-btn:disabled {
+  color: var(--ink-3);
+}
+.spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  display: inline-block;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ai-panel {
+  border: 1px solid var(--line-strong);
+  background: var(--sunken);
+  border-radius: var(--r-lg);
+  padding: 12px 16px;
+  margin-bottom: 22px;
+}
+.ai-panel[aria-labelledby] > .stack {
+  margin-top: 12px;
+}
+.ai-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.ai-head svg {
+  color: var(--accent);
+}
+.ai-head .hint {
+  font-weight: 400;
+}
+.ai-model summary {
+  cursor: pointer;
+  font-size: 0.9em;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* ---- sharing ---- */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 2px;
+  margin-bottom: 14px;
+  max-width: 100%;
+}
+.seg button {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.by {
+  color: var(--ink-3);
+  font-size: 0.867em;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.card-view dt {
+  font-weight: 600;
+  font-size: 0.85em;
+  color: var(--ink-3);
+  margin-top: 12px;
+}
+.card-view dd {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-voice);
+  line-height: 1.5;
+}
+.card-view dd.mono {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+}
+@media (max-width: 820px) {
+  .rail-user {
+    display: none;
+  }
+}
+
+/* ---- phone layout fixes ---- */
+.only-sm,
+.lbl-short {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .editor {
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+  .editor-form {
+    min-height: auto;
+  }
+  .editor-side {
+    min-height: 0;
+  }
+  .editor-side .pane {
+    overflow: visible;
+  }
+}
+@media (max-width: 820px) {
+  .hide-sm,
+  .lbl-long {
+    display: none;
+  }
+  .only-sm,
+  .lbl-short {
+    display: inline;
+  }
+  .rail {
+    overflow: visible;
+    gap: 0;
+    padding: 4px 6px;
+  }
+  .settings-nav .rail-link {
+    flex: none;
+    white-space: nowrap;
+  }
+  .rail > .rail-link {
+    flex: 1 1 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 4px;
+    font-size: 0.75rem;
+    min-width: 0;
+  }
+  .topbar {
+    padding: 8px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .topbar h1 {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .topbar .chip {
+    order: 5;
+  }
+  .editor-form .page-inner {
+    padding-bottom: 28px;
+  }
+  .avatar-edit {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .ai-panel {
+    padding: 12px;
+  }
+  .ai-panel .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .prompt-block {
+    padding: 14px 12px 12px;
+  }
+  .label-row {
+    flex-wrap: wrap;
+  }
+  .seg button {
+    padding: 6px 12px;
+  }
+}
+@media (max-width: 820px) {
+  .switch:has(select) {
+    flex-wrap: wrap;
+  }
+  .switch:has(select) .grow {
+    flex: 1 1 100%;
+  }
+  .switch:has(select) select {
+    width: 100% !important;
+  }
+}
+@media (max-width: 820px) {
+  .page-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .page-head > .grow {
+    flex: 1 1 100%;
+  }
+  .search.grow {
+    flex: 1 1 100%;
+    max-width: none !important;
+  }
+}
+
+/* ---- suggest a reply ---- */
+.suggest {
+  margin-bottom: 6px;
+}
+.suggest-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--ink-3);
+  min-height: 30px;
+}
+.suggest-list {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.suggest-list button {
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  padding: 9px 12px;
+  font: inherit;
+  line-height: 1.45;
+  color: var(--ink);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.suggest-list button:hover,
+.suggest-list button:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+/* ---- portrait generator ---- */
+.pg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.pg-img {
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--sunken);
+  cursor: pointer;
+  aspect-ratio: 1;
+}
+.pg-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pg-img.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}

@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { HOST, PORT, PUBLIC_DIR, DATA_DIR } from './config.js';
 import { api } from './routes/api.js';
 import { HttpError, log, redact } from './util.js';
-import { closeDb } from './db.js';
+import { closeAll } from './accounts.js';
+import { closeShared } from './shared.js';
+import { auth, requireUser } from './routes/auth.js';
+import { VERSION } from './config.js';
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
@@ -44,7 +47,9 @@ export function createApp({ dev = !!process.env.FOLIO_DEV } = {}) {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
-  app.use('/api', api);
+  app.get('/api/health', (req, res) => res.json({ ok: true, version: VERSION }));
+  app.use('/api/auth', auth);
+  app.use('/api', requireUser, api);
 
   if (fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) {
     app.use(express.static(PUBLIC_DIR, { index: false, maxAge: '1h' }));
@@ -78,8 +83,8 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 if (isMain) {
   if (!LOOPBACK.has(HOST) && process.env.FOLIO_ALLOW_NETWORK !== '1') {
     console.error(
-      `Refusing to listen on ${HOST}. Folio has no login and stores API keys, so it only binds to this computer by default.\n` +
-        'If you really want network access, set FOLIO_ALLOW_NETWORK=1 and FOLIO_ALLOWED_HOSTS=<your hostname>, and put it behind a trusted VPN or authenticating reverse proxy.'
+      `Refusing to listen on ${HOST}. By default Folio only accepts connections from this computer.\n` +
+        'To serve other people, set FOLIO_ALLOW_NETWORK=1 and FOLIO_ALLOWED_HOSTS=<your hostname>, and put it behind HTTPS (a reverse proxy; also set FOLIO_TRUST_PROXY=1 and FOLIO_SECURE_COOKIES=1). Passwords sent over plain http can be read on the network.'
     );
     process.exit(1);
   }
@@ -90,7 +95,8 @@ if (isMain) {
   });
   const shutdown = () => {
     server.close(() => {
-      closeDb();
+      closeAll();
+      closeShared();
       process.exit(0);
     });
     setTimeout(() => process.exit(0), 2000).unref();

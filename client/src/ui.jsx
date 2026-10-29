@@ -9,7 +9,7 @@ export function Avatar({ character, size = 40, className = '' }) {
   return (
     <span className={`avatar ${className}`} style={{ '--s': `${size}px`, '--h': hueFor(name) }} aria-hidden="true">
       {character?.hasAvatar ? (
-        <img src={`/api/characters/${character.id}/avatar?v=${encodeURIComponent(character.avatarVersion || '')}`} alt="" loading="lazy" />
+        <img src={character.avatarSrc || `/api/characters/${character.id}/avatar?v=${encodeURIComponent(character.avatarVersion || '')}`} alt="" loading="lazy" />
       ) : (
         letter
       )}
@@ -132,10 +132,10 @@ export function ConfirmProvider({ children }) {
 }
 
 /* ------------------------------------------------------------------ small pieces */
-export function Field({ label, hint, error, children, htmlFor }) {
+export function Field({ label, hint, error, children, htmlFor, action }) {
   return (
     <div className="field">
-      {label && <label htmlFor={htmlFor}>{label}</label>}
+      {label && (action ? <div className="label-row"><label htmlFor={htmlFor}>{label}</label>{action}</div> : <label htmlFor={htmlFor}>{label}</label>)}
       {children}
       {error ? <div className="field-error" role="alert">{error}</div> : hint ? <div className="hint">{hint}</div> : null}
     </div>

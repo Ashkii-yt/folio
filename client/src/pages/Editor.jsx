@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ImagePlus, MessageCircle, Send, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, ImagePlus, MessageCircle, Send, Sparkles, WandSparkles, Square, Trash2 } from 'lucide-react';
 import { useApp } from '../store.jsx';
 import { api, stream } from '../api.js';
 import { Avatar, ErrorNotice, Field, Notice, Spinner, Styled, Toggle, useConfirm, useToast } from '../ui.jsx';
 import { imageToAvatar } from '../lib.js';
+import PortraitDialog from '../components/PortraitDialog.jsx';
 
 const BLANK = {
   name: '', description: '', tags: [], avatar: null,
@@ -14,6 +15,8 @@ const BLANK = {
 };
 const FIELDS = Object.keys(BLANK);
 const pick = (c) => Object.fromEntries(FIELDS.map((k) => [k, c[k] ?? BLANK[k]]));
+const AI_FIELDS = ['name', 'description', 'tags', 'personality', 'background', 'speakingStyle', 'goals', 'greeting', 'exampleDialogue', 'systemPromptAddition'];
+const AI_LABEL = { name: 'name', description: 'description', tags: 'tags', personality: 'personality', background: 'background', speakingStyle: 'speaking style', goals: 'goals', greeting: 'greeting', exampleDialogue: 'example dialogue', systemPromptAddition: 'system prompt addition' };
 const draftKey = (id) => `folio.draft.${id || 'new'}`;
 
 export default function Editor() {
@@ -33,6 +36,11 @@ export default function Editor() {
   const [restored, setRestored] = useState(false);
   const [tagText, setTagText] = useState('');
   const [side, setSide] = useState('card');
+  const [portraitOpen, setPortraitOpen] = useState(false);
+  const closePortrait = useCallback(() => setPortraitOpen(false), []);
+  const [ai, setAi] = useState({ idea: '', providerId: '', model: '', busy: null, error: null });
+  const aiCtl = useRef(null);
+  useEffect(() => () => aiCtl.current?.abort(), []);
   const nameRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -88,6 +96,50 @@ export default function Editor() {
     setF((x) => ({ ...x, [k]: v }));
     if (errors[k]) setErrors((e) => ({ ...e, [k]: undefined }));
   };
+
+  const isEmpty = (k) => (k === 'tags' ? !f.tags.length : !String(f[k] ?? '').trim());
+
+  /** Ask the model to write some fields. Everything it writes can be undone from the toast. */
+  const generate = async (fields, { fromField = false } = {}) => {
+    if (ai.busy) return;
+    const before = f;
+    aiCtl.current = new AbortController();
+    setAi((a) => ({ ...a, busy: fields.length === 1 ? fields[0] : 'all', error: null }));
+    try {
+      const { fields: got } = await api.post('/characters/generate', {
+        idea: ai.idea, fields, current: pick(f), providerId: ai.providerId || undefined, model: ai.model || undefined,
+      }, { signal: aiCtl.current.signal });
+      const keys = Object.keys(got);
+      setF((x) => ({ ...x, ...got }));
+      if (got.tags) setTagText(got.tags.join(', '));
+      setErrors((e) => ({ ...e, ...(got.name ? { name: undefined } : {}) }));
+      toast.info(keys.length === 1 ? `Drafted the ${AI_LABEL[keys[0]]}.` : `Drafted ${keys.length} parts. Read it over and make it yours.`, {
+        ms: 12000,
+        action: { label: 'Undo', run: () => { setF((x) => ({ ...x, ...Object.fromEntries(keys.map((k) => [k, before[k]])) })); if (got.tags) setTagText(before.tags.join(', ')); } },
+      });
+    } catch (e) {
+      if (e.code !== 'aborted') {
+        setAi((a) => ({ ...a, error: e }));
+        if (fromField) toast.error(e.message);
+      }
+    } finally {
+      setAi((a) => ({ ...a, busy: null }));
+    }
+  };
+
+  const writeAll = async () => {
+    if (AI_FIELDS.some((k) => !isEmpty(k))) {
+      const ok = await confirm({ title: 'Replace what you have written?', message: 'The model will write every part again from your idea. You can undo it right after.', confirmLabel: 'Write it again', cancelLabel: 'Cancel', danger: false });
+      if (!ok) return;
+    }
+    generate(AI_FIELDS);
+  };
+
+  const aiBtn = (k) => (
+    <button type="button" className="btn sm ghost ai-btn" onClick={() => generate([k], { fromField: true })} disabled={!!ai.busy} aria-label={`${isEmpty(k) ? 'Draft' : 'Rewrite'} the ${AI_LABEL[k]} with AI`}>
+      {ai.busy === k ? <span className="spin" aria-hidden="true" /> : <Sparkles size={13} aria-hidden="true" />} {ai.busy === k ? 'Writing…' : isEmpty(k) ? 'Draft with AI' : 'Rewrite'}
+    </button>
+  );
 
   const commitTags = (text) => {
     const tags = [...new Set(text.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 12);
@@ -186,8 +238,8 @@ export default function Editor() {
         <button className="btn ghost icon" onClick={leave} aria-label="Back to my characters"><ArrowLeft size={18} /></button>
         <h1 className="grow clamp-1">{isNew ? 'New character' : f.name || 'Untitled character'}</h1>
         {dirty && <span className="chip warn" role="status">Unsaved changes</span>}
-        <button className="btn" onClick={chatNow} disabled={saving}><MessageCircle size={16} aria-hidden="true" /> {isNew || dirty ? 'Save and chat' : 'Chat'}</button>
-        <button className="btn primary" onClick={save} disabled={saving || (!dirty && !isNew)}>{saving ? 'Saving…' : isNew ? 'Create character' : 'Save changes'}</button>
+        <button className="btn" onClick={chatNow} disabled={saving}><MessageCircle size={16} aria-hidden="true" /> <span className="hide-sm">{isNew || dirty ? 'Save and chat' : 'Chat'}</span><span className="only-sm">Chat</span></button>
+        <button className="btn primary" onClick={save} disabled={saving || (!dirty && !isNew)}>{saving ? 'Saving…' : isNew ? <><span className="hide-sm">Create character</span><span className="only-sm">Create</span></> : <><span className="hide-sm">Save changes</span><span className="only-sm">Save</span></>}</button>
       </div>
 
       <div className="editor grow">
@@ -202,6 +254,8 @@ export default function Editor() {
             )}
             <ErrorNotice error={saveError} />
 
+            <AiPanel ai={ai} setAi={setAi} providers={providers} isNew={isNew} empties={AI_FIELDS.filter(isEmpty)} hasDraft={AI_FIELDS.some((k) => !isEmpty(k))} onAll={writeAll} onEmpty={() => generate(AI_FIELDS.filter(isEmpty))} onCancel={() => aiCtl.current?.abort()} />
+
             <section className="form-section" aria-labelledby="s-id">
               <h2 id="s-id">Identity</h2>
               <p className="lead">Who they are at a glance.</p>
@@ -212,18 +266,19 @@ export default function Editor() {
                     <div className="cluster">
                       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={pickImage} />
                       <button className="btn sm" onClick={() => fileRef.current.click()}><ImagePlus size={14} aria-hidden="true" /> {f.avatar ? 'Change portrait' : 'Add portrait'}</button>
+                      <button className="btn sm" onClick={() => setPortraitOpen(true)}><WandSparkles size={14} aria-hidden="true" /> Generate portrait</button>
                       {f.avatar && <button className="btn sm ghost" onClick={() => set('avatar', null)}><Trash2 size={14} aria-hidden="true" /> Remove</button>}
                     </div>
-                    <span className="hint">Optional. Cropped to a square and stored in your local database.</span>
+                    <span className="hint">Optional. Upload one or generate it. Cropped to a square and stored in your database.</span>
                   </div>
                 </div>
-                <Field label="Name" htmlFor="c-name" error={errors.name}>
+                <Field label="Name" htmlFor="c-name" action={aiBtn('name')} error={errors.name}>
                   <input id="c-name" ref={nameRef} className="input" value={f.name} maxLength={90} aria-invalid={!!errors.name} onChange={(e) => set('name', e.target.value)} placeholder="Wren Halloway" autoComplete="off" />
                 </Field>
-                <Field label="Short description" htmlFor="c-desc" error={errors.description} hint="One or two lines, shown in the library.">
+                <Field label="Short description" htmlFor="c-desc" action={aiBtn('description')} error={errors.description} hint="One or two lines, shown in the library.">
                   <input id="c-desc" className="input" value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="Navigator of a salvage tug. Dry humor, steady hands." />
                 </Field>
-                <Field label="Tags" htmlFor="c-tags" hint="Comma-separated. Used to filter the library.">
+                <Field label="Tags" htmlFor="c-tags" action={aiBtn('tags')} hint="Comma-separated. Used to filter the library.">
                   <input id="c-tags" className="input" value={tagText} onChange={(e) => { setTagText(e.target.value); commitTags(e.target.value); }} onBlur={() => setTagText(f.tags.join(', '))} placeholder="adventure, banter" />
                 </Field>
               </div>
@@ -233,13 +288,13 @@ export default function Editor() {
               <h2 id="s-pers">Personality and background</h2>
               <p className="lead">Use {'{{user}}'} for the person chatting and {'{{char}}'} for this character's name in any field.</p>
               <div className="fields">
-                <Field label="Personality traits" htmlFor="c-pers" hint="How they think, feel and behave.">
+                <Field label="Personality traits" htmlFor="c-pers" action={aiBtn('personality')} hint="How they think, feel and behave.">
                   <textarea id="c-pers" className="textarea" rows={4} value={f.personality} onChange={(e) => set('personality', e.target.value)} placeholder="Dry, observant, quietly loyal. Distrusts anyone who is never tired." />
                 </Field>
-                <Field label="Background and lore" htmlFor="c-bg" hint="History, setting, relationships, facts about their world.">
+                <Field label="Background and lore" htmlFor="c-bg" action={aiBtn('background')} hint="History, setting, relationships, facts about their world.">
                   <textarea id="c-bg" className="textarea" rows={6} value={f.background} onChange={(e) => set('background', e.target.value)} />
                 </Field>
-                <Field label="Goals, motivations and preferences" htmlFor="c-goals" hint="What they want, and what they like or avoid.">
+                <Field label="Goals, motivations and preferences" htmlFor="c-goals" action={aiBtn('goals')} hint="What they want, and what they like or avoid.">
                   <textarea id="c-goals" className="textarea" rows={4} value={f.goals} onChange={(e) => set('goals', e.target.value)} />
                 </Field>
               </div>
@@ -249,20 +304,20 @@ export default function Editor() {
               <h2 id="s-voice">Voice</h2>
               <p className="lead">How they sound, and how a conversation begins.</p>
               <div className="fields">
-                <Field label="Speaking style and mannerisms" htmlFor="c-style">
+                <Field label="Speaking style and mannerisms" htmlFor="c-style" action={aiBtn('speakingStyle')}>
                   <textarea id="c-style" className="textarea" rows={4} value={f.speakingStyle} onChange={(e) => set('speakingStyle', e.target.value)} placeholder="Short, wry sentences. Goes quieter instead of louder." />
                 </Field>
-                <Field label="Greeting" htmlFor="c-greet" hint="Optional opening message for each new conversation.">
+                <Field label="Greeting" htmlFor="c-greet" action={aiBtn('greeting')} hint="Optional opening message for each new conversation.">
                   <textarea id="c-greet" className="textarea voice-input" rows={4} value={f.greeting} onChange={(e) => set('greeting', e.target.value)} />
                 </Field>
-                <Field label="Example dialogue" htmlFor="c-ex" hint="Optional. A few lines that show the voice, for example “{{user}}: …” then “{{char}}: …”.">
+                <Field label="Example dialogue" htmlFor="c-ex" action={aiBtn('exampleDialogue')} hint="Optional. A few lines that show the voice, for example “{{user}}: …” then “{{char}}: …”.">
                   <textarea id="c-ex" className="textarea voice-input" rows={5} value={f.exampleDialogue} onChange={(e) => set('exampleDialogue', e.target.value)} />
                 </Field>
               </div>
             </section>
 
             <div className="prompt-block">
-              <h2 id="s-prompt">System prompt addition</h2>
+              <div className="label-row"><h2 id="s-prompt">System prompt addition</h2>{aiBtn('systemPromptAddition')}</div>
               <p className="hint" style={{ margin: '2px 0 12px' }}>
                 Your own instructions for how this character behaves, thinks and replies. Folio sends them after the fields above, as a separate block the model is told to follow. Nothing else you edit changes this text.
               </p>
@@ -293,6 +348,7 @@ export default function Editor() {
           </div>
         </div>
 
+        {portraitOpen && <PortraitDialog character={f} onClose={closePortrait} onUse={(a) => { set('avatar', a); setPortraitOpen(false); }} />}
         <aside className="editor-side" aria-label="Preview">
           <div className="tabs" role="tablist">
             {[['card', 'Card'], ['chat', 'Test chat'], ['prompt', 'Prompt']].map(([k, label]) => (
@@ -311,6 +367,61 @@ export default function Editor() {
 }
 
 /* ------------------------------------------------------------------ pieces */
+
+function AiPanel({ ai, setAi, providers, isNew, empties, hasDraft, onAll, onEmpty, onCancel }) {
+  const [models, setModels] = useState([]);
+  const [open, setOpen] = useState(isNew);
+  useEffect(() => {
+    setModels([]);
+    if (!ai.providerId) return;
+    let alive = true;
+    api.get(`/providers/${ai.providerId}/models`).then((r) => { if (alive && r.ok) setModels(r.models.map((m) => m.id)); }).catch(() => {});
+    return () => { alive = false; };
+  }, [ai.providerId]);
+  const busy = !!ai.busy;
+  const noIdea = !ai.idea.trim() && !hasDraft;
+  const noProvider = ai.error?.code === 'no_provider';
+  return (
+    <section className="ai-panel" aria-labelledby="s-ai">
+      <button type="button" className="ai-head" aria-expanded={open} aria-controls="ai-body" onClick={() => setOpen((v) => !v)}>
+        <Sparkles size={16} aria-hidden="true" />
+        <span id="s-ai">Create with AI</span>
+        <span className="hint">{open ? '' : 'Describe an idea and let the model write the card'}</span>
+      </button>
+      {open && (
+        <div id="ai-body" className="stack" style={{ gap: 12 }}>
+          <Field label="Your idea" htmlFor="ai-idea" hint="A few words are enough. Add anything you care about: setting, mood, how they talk. Your idea and any text already written below are sent to the model you pick.">
+            <textarea id="ai-idea" className="textarea" rows={3} maxLength={3000} value={ai.idea} disabled={busy} onChange={(e) => setAi((a) => ({ ...a, idea: e.target.value }))} placeholder="A gruff lighthouse keeper who secretly writes love poems to the sea" />
+          </Field>
+          <details className="ai-model">
+            <summary>Model: {ai.providerId ? `${providers.find((p) => p.id === ai.providerId)?.name || 'Chosen provider'}${ai.model ? ` · ${ai.model}` : ''}` : 'your default model'}</summary>
+            <div className="fields two" style={{ marginTop: 10 }}>
+              <Field label="Provider" htmlFor="ai-prov">
+                <select id="ai-prov" className="select" value={ai.providerId} disabled={busy} onChange={(e) => setAi((a) => ({ ...a, providerId: e.target.value, model: '' }))}>
+                  <option value="">Default provider</option>
+                  {providers.filter((p) => p.enabled).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Model" htmlFor="ai-model" hint={ai.providerId ? 'Leave empty for that provider’s default.' : 'Choose a provider first to pick a different model.'}>
+                <input id="ai-model" className="input" list="ai-models" value={ai.model} disabled={busy || !ai.providerId} onChange={(e) => setAi((a) => ({ ...a, model: e.target.value }))} placeholder="Provider default" />
+                <datalist id="ai-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
+              </Field>
+            </div>
+          </details>
+          <div className="cluster wrap">
+            <button type="button" className="btn primary" onClick={onAll} disabled={busy || noIdea}>
+              {ai.busy === 'all' ? <span className="spin" aria-hidden="true" /> : <Sparkles size={15} aria-hidden="true" />} {ai.busy === 'all' ? 'Writing the character…' : 'Write the whole character'}
+            </button>
+            {hasDraft && <button type="button" className="btn" onClick={onEmpty} disabled={busy || !empties.length}>Fill in only the empty parts</button>}
+            {busy && <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>}
+          </div>
+          <p className="hint">Prefer to write it yourself? Every part below also has its own “Draft with AI” button, and the portrait is always yours to choose.</p>
+          <ErrorNotice error={ai.error} action={noProvider ? <Link className="btn sm" to="/settings/providers">Set up a provider</Link> : undefined} />
+        </div>
+      )}
+    </section>
+  );
+}
 
 function ModelOverride({ f, set, providers }) {
   const [models, setModels] = useState([]);
@@ -366,7 +477,7 @@ function CardPreview({ c }) {
       <dl>
         {rows.map(([k, v]) => (<div key={k}><dt>{k}</dt><dd className="clamp-4" style={{ display: 'block' }}>{v.length > 320 ? `${v.slice(0, 320)}…` : v}</dd></div>))}
       </dl>
-      {!rows.length && !c.greeting.trim() && <p className="hint" style={{ marginTop: 14 }}>Fill in the sections on the left and the card updates here.</p>}
+      {!rows.length && !c.greeting.trim() && <p className="hint" style={{ marginTop: 14 }}>Fill in the form and the card updates here.</p>}
     </div>
   );
 }

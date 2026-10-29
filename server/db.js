@@ -1,13 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
-import { DATA_DIR } from './config.js';
 
-export const DB_PATH = process.env.FOLIO_DB_PATH || path.join(DATA_DIR, 'folio.db');
-
-export const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
-db.exec('PRAGMA busy_timeout = 5000;');
+/**
+ * One SQLite database per account, in data/<username>/folio.db.
+ * Request handlers run inside runAs(userContext, ...), and q / tx below resolve to that user's
+ * database, so service code never has to know which account it is serving.
+ */
 
 const MIGRATIONS = [
   // v1: full initial schema
@@ -147,9 +146,27 @@ const MIGRATIONS = [
     INSERT INTO messages_fts(rowid, content) VALUES (new.rid, new.content);
   END;
   `,
+  // v2: where a character came from when it was added from another user's shared card
+  `
+  ALTER TABLE characters ADD COLUMN origin_shared_id TEXT;
+  ALTER TABLE characters ADD COLUMN origin_owner TEXT;
+  `,
+  // v3: portrait image generation settings (one row)
+  `
+  CREATE TABLE image_config (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    provider    TEXT NOT NULL DEFAULT 'horde',
+    base_url    TEXT NOT NULL DEFAULT '',
+    model       TEXT NOT NULL DEFAULT '',
+    size        TEXT NOT NULL DEFAULT '',
+    api_key_enc TEXT,
+    remote_ack  INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL
+  );
+  `,
 ];
 
-function migrate() {
+function migrate(db) {
   const current = db.prepare('PRAGMA user_version').get().user_version;
   for (let v = current; v < MIGRATIONS.length; v++) {
     db.exec('BEGIN');
@@ -163,19 +180,38 @@ function migrate() {
     }
   }
 }
-migrate();
+
+export function openDatabase(file) {
+  const db = new DatabaseSync(file);
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA foreign_keys = ON;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  migrate(db);
+  return db;
+}
+
+const als = new AsyncLocalStorage();
+export const runAs = (ctx, fn) => als.run(ctx, fn);
+export const currentUser = () => als.getStore() || null;
+function cur() {
+  const c = als.getStore();
+  if (!c) throw new Error('No signed-in user for this operation.');
+  return c;
+}
+export const dbFile = () => path.join(cur().dir, 'folio.db');
 
 /** node:sqlite rejects undefined and booleans, so normalise bound values. */
 const norm = (v) => (v === undefined ? null : typeof v === 'boolean' ? (v ? 1 : 0) : v);
 
 export const q = {
-  get: (sql, ...p) => db.prepare(sql).get(...p.map(norm)),
-  all: (sql, ...p) => db.prepare(sql).all(...p.map(norm)),
-  run: (sql, ...p) => db.prepare(sql).run(...p.map(norm)),
+  get: (sql, ...p) => cur().db.prepare(sql).get(...p.map(norm)),
+  all: (sql, ...p) => cur().db.prepare(sql).all(...p.map(norm)),
+  run: (sql, ...p) => cur().db.prepare(sql).run(...p.map(norm)),
 };
 
 /** Synchronous transaction helper (node:sqlite is synchronous, so never await inside fn). */
 export function tx(fn) {
+  const { db } = cur();
   db.exec('BEGIN IMMEDIATE');
   try {
     const out = fn();
@@ -187,7 +223,7 @@ export function tx(fn) {
   }
 }
 
-export function closeDb() {
+export function closeDatabase(db) {
   try {
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } catch {
