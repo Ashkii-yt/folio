@@ -164,6 +164,52 @@ const MIGRATIONS = [
     updated_at  TEXT NOT NULL
   );
   `,
+  // v4: identity, sync bookkeeping, and portrait account id
+  `
+  ALTER TABLE image_config ADD COLUMN account_id TEXT NOT NULL DEFAULT '';
+
+  CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  INSERT INTO meta (key, value) VALUES ('database_id', 'db_' || lower(hex(randomblob(10))));
+  INSERT INTO meta (key, value) VALUES ('created_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+  -- Deleted rows are remembered so a deletion can travel to other servers instead of the row being copied back.
+  CREATE TABLE tombstones (
+    tbl        TEXT NOT NULL,
+    id         TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    PRIMARY KEY (tbl, id)
+  );
+  CREATE TABLE sync_peers (
+    peer_database_id TEXT PRIMARY KEY,
+    peer_server_id   TEXT NOT NULL,
+    peer_server_name TEXT NOT NULL DEFAULT '',
+    last_sync_at     TEXT NOT NULL,
+    last_action      TEXT NOT NULL DEFAULT '',
+    last_stats       TEXT NOT NULL DEFAULT '{}'
+  );
+
+  CREATE TRIGGER characters_tomb AFTER DELETE ON characters BEGIN
+    INSERT OR REPLACE INTO tombstones (tbl, id, deleted_at) VALUES ('characters', old.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+  END;
+  CREATE TRIGGER conversations_tomb AFTER DELETE ON conversations BEGIN
+    INSERT OR REPLACE INTO tombstones (tbl, id, deleted_at) VALUES ('conversations', old.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+  END;
+  CREATE TRIGGER messages_tomb AFTER DELETE ON messages BEGIN
+    INSERT OR REPLACE INTO tombstones (tbl, id, deleted_at) VALUES ('messages', old.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+  END;
+  CREATE TRIGGER memories_tomb AFTER DELETE ON memories BEGIN
+    INSERT OR REPLACE INTO tombstones (tbl, id, deleted_at) VALUES ('memories', old.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+  END;
+  CREATE TRIGGER summaries_tomb AFTER DELETE ON summaries BEGIN
+    INSERT OR REPLACE INTO tombstones (tbl, id, deleted_at) VALUES ('summaries', old.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+  END;
+  -- A row that comes back (for example from a backup restore) is alive again.
+  CREATE TRIGGER characters_untomb AFTER INSERT ON characters BEGIN DELETE FROM tombstones WHERE tbl = 'characters' AND id = new.id; END;
+  CREATE TRIGGER conversations_untomb AFTER INSERT ON conversations BEGIN DELETE FROM tombstones WHERE tbl = 'conversations' AND id = new.id; END;
+  CREATE TRIGGER messages_untomb AFTER INSERT ON messages BEGIN DELETE FROM tombstones WHERE tbl = 'messages' AND id = new.id; END;
+  CREATE TRIGGER memories_untomb AFTER INSERT ON memories BEGIN DELETE FROM tombstones WHERE tbl = 'memories' AND id = new.id; END;
+  CREATE TRIGGER summaries_untomb AFTER INSERT ON summaries BEGIN DELETE FROM tombstones WHERE tbl = 'summaries' AND id = new.id; END;
+  `,
 ];
 
 function migrate(db) {

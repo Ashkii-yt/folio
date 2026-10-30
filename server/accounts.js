@@ -292,3 +292,17 @@ export async function changePassword(name, { current, next, ip }) {
   fs.writeFileSync(path.join(userDir(name), SECRET_FILE), JSON.stringify(s, null, 2), { mode: 0o600 });
   getContext(name).pwTag = s.password.slice(-24); // every older session cookie stops working
 }
+
+/** Used by server-to-server replication: create an account here with the same login (password hash) as on another server. */
+export function createAccountFromSync(username, passwordHash) {
+  const name = normalizeUsername(username);
+  if (!/^scrypt\$\d+\$\d+\$\d+\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/.test(String(passwordHash))) throw bad('Bad password record.');
+  if (fs.existsSync(userDir(name))) return false;
+  fs.mkdirSync(userDir(name), { mode: 0o700 });
+  const secrets = { format: 'folio-account', version: 1, username: name, password: passwordHash, encryptionKey: crypto.randomBytes(32).toString('base64'), ipHash: '', createdAt: now() };
+  fs.writeFileSync(path.join(userDir(name), SECRET_FILE), JSON.stringify(secrets, null, 2), { mode: 0o600, flag: 'wx' });
+  getContext(name);
+  return true;
+}
+
+export const passwordRecord = (name) => readSecrets(name)?.password || null;

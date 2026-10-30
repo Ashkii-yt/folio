@@ -5,6 +5,7 @@ import { useApp } from '../store.jsx';
 import { api, download, stream, uploadJson } from '../api.js';
 import { Dialog, ErrorNotice, Field, Notice, Toggle, useConfirm, useToast } from '../ui.jsx';
 import { bytes, hostScope } from '../lib.js';
+import { getPrefs, setPrefs, listVoices, onVoices, speak, stopSpeaking, ttsSupported } from '../tts.js';
 
 const SECTIONS = [
   ['general', 'General'],
@@ -111,6 +112,7 @@ function General() {
           </select>
         </Row>
       </div>
+      <ReadAloud />
       <Account />
       <div className="group">
         <h3>About</h3>
@@ -118,6 +120,37 @@ function General() {
         {dataInfo && <p className="hint mono" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>{dataInfo.path}</p>}
       </div>
     </>
+  );
+}
+
+function ReadAloud() {
+  const [prefs, setP] = useState(getPrefs);
+  const [voices, setVoices] = useState(listVoices);
+  useEffect(() => onVoices(() => setVoices(listVoices())), []);
+  useEffect(() => () => stopSpeaking(), []);
+  if (!ttsSupported()) {
+    return <div className="group"><h3>Read aloud</h3><p className="muted">This browser has no built-in speech, so the read-aloud button is hidden.</p></div>;
+  }
+  const set = (patch) => { setPrefs(patch); setP((p) => ({ ...p, ...patch })); };
+  return (
+    <div className="group">
+      <h3>Read aloud</h3>
+      <p className="hint" style={{ marginBottom: 8 }}>The speaker button under a character's message reads it with a voice built into this device. Nothing is sent anywhere. These choices are saved on this device only.</p>
+      <Row label="Voice" htmlFor="tts-voice">
+        <select id="tts-voice" className="select" style={{ maxWidth: 280 }} value={prefs.voiceURI} onChange={(e) => set({ voiceURI: e.target.value })}>
+          <option value="">Device default</option>
+          {voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}
+        </select>
+      </Row>
+      <Row label="Speed" htmlFor="tts-rate">
+        <div className="cluster">
+          <input id="tts-rate" type="range" min="0.6" max="1.6" step="0.05" value={prefs.rate} onChange={(e) => set({ rate: Number(e.target.value) })} />
+          <span className="small muted" style={{ minWidth: 34 }}>{Number(prefs.rate).toFixed(2)}×</span>
+        </div>
+      </Row>
+      <Toggle label="Skip *actions*" hint="Reads only what the character says, not the italic action text between asterisks." checked={prefs.skipActions} onChange={(v) => set({ skipActions: v })} />
+      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => speak('This is how I will sound. *smiles* Shall we begin?')}>Play a sample</button>
+    </div>
   );
 }
 
@@ -177,7 +210,7 @@ function PortraitSettings() {
   const ctl = useRef(null);
   useEffect(() => () => ctl.current?.abort(), []);
   useEffect(() => {
-    api.get('/images/config').then((c) => { setCfg(c); setF({ provider: c.provider, baseUrl: c.baseUrl, model: c.model, size: c.size, remoteAck: c.remoteAck }); }).catch(setErr);
+    api.get('/images/config').then((c) => { setCfg(c); setF({ provider: c.provider, baseUrl: c.baseUrl, model: c.model, size: c.size, accountId: c.accountId || '', remoteAck: c.remoteAck }); }).catch(setErr);
   }, []);
   if (err) return <ErrorNotice error={err} />;
   if (!cfg || !f) return <p className="muted" role="status">Loading…</p>;
@@ -229,7 +262,7 @@ function PortraitSettings() {
       <p className="lead">Which service draws character portraits when you press “Generate portrait” in the character editor.</p>
       <div className="group">
         <Field label="Image service" htmlFor="im-prov">
-          <select id="im-prov" className="select" style={{ maxWidth: 360 }} value={f.provider} onChange={(e) => set('provider', e.target.value)}>
+          <select id="im-prov" className="select" style={{ maxWidth: 360 }} value={f.provider} onChange={(e) => setF((x) => ({ ...x, provider: e.target.value, model: '', size: '', baseUrl: e.target.value === 'openai' ? x.baseUrl : '' }))}>
             {cfg.providers.map((p) => <option key={p.type} value={p.type}>{p.label}</option>)}
           </select>
         </Field>
@@ -237,6 +270,11 @@ function PortraitSettings() {
         {info.fields.includes('baseUrl') && (
           <Field label="API base URL" htmlFor="im-url" hint="Ends in /v1 for OpenAI-style servers.">
             <input id="im-url" className="input" value={f.baseUrl} onChange={(e) => set('baseUrl', e.target.value)} placeholder={cfg.defaults.openai} />
+          </Field>
+        )}
+        {info.fields.includes('accountId') && (
+          <Field label="Account ID" htmlFor="im-acct" hint="Shown on the right side of your Cloudflare dashboard home page.">
+            <input id="im-acct" className="input" autoComplete="off" value={f.accountId} onChange={(e) => set('accountId', e.target.value)} />
           </Field>
         )}
         {info.fields.includes('key') && (
@@ -644,6 +682,36 @@ function MemorySettings() {
 
 /* ------------------------------------------------------------------ data */
 
+function SyncInfo() {
+  const [info, setInfo] = useState(null);
+  const toast = useToast();
+  useEffect(() => { api.get('/sync/identity').then(setInfo).catch(() => {}); }, []);
+  if (!info) return null;
+  const copy = async (t) => { try { await navigator.clipboard.writeText(t); toast.info('Copied.'); } catch { toast.error('Copy failed.'); } };
+  const id = (label, v) => (
+    <div className="switch">
+      <div className="grow"><div style={{ fontWeight: 600 }}>{label}</div><div className="mono small" style={{ overflowWrap: 'anywhere' }}>{v}</div></div>
+      <button className="btn sm" onClick={() => copy(v)}>Copy</button>
+    </div>
+  );
+  return (
+    <div className="group">
+      <h3>Server and database IDs</h3>
+      <p className="hint" style={{ marginBottom: 6 }}>Anyone who knows this ID and has been paired can reach this server, with no URL or port forwarding. Sync covers every account on the server and is run from the command line: <span className="mono">npm run pair</span> here, <span className="mono">npm run link -- &lt;server id&gt; &lt;code&gt;</span> on the other machine, then <span className="mono">npm run sync -- &lt;server id&gt;</span>. See the README.</p>
+      {id(`Server “${info.name}”`, info.serverId)}
+      {id('This database', info.databaseId)}
+      {info.peers.length > 0 && (
+        <>
+          <h4 style={{ margin: '12px 0 4px' }}>Synced with</h4>
+          {info.peers.map((p) => (
+            <p key={p.peer_database_id} className="small">{p.peer_server_name || p.peer_server_id} · <span className="mono">{p.peer_server_id}</span> · {p.last_action} on {new Date(p.last_sync_at).toLocaleString()}</p>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DataSettings() {
   const { dataInfo, providers, refreshData, reload } = useApp();
   const confirm = useConfirm();
@@ -699,7 +767,7 @@ function DataSettings() {
       <p className="lead">Where your data lives, what is shared, and how to take it with you.</p>
       <div className="group">
         <h3>Where it is stored</h3>
-        <p>Everything is saved in one database file on the computer running Folio. There is no Folio account and no cloud sync.</p>
+        <p>Everything is saved in your own database file on the computer running Folio. It only leaves that computer when you ask: to your model provider with each message, to the image service for portraits, or when you sync with another Folio server yourself.</p>
         {dataInfo && (
           <>
             <p className="hint mono" style={{ margin: '8px 0', overflowWrap: 'anywhere' }}>{dataInfo.path}</p>
@@ -710,6 +778,7 @@ function DataSettings() {
               <div className="stat"><b>{c.memories ?? 0}</b><span>memories</span></div>
               <div className="stat"><b>{bytes(dataInfo.sizeBytes)}</b><span>on disk</span></div>
             </div>
+      <SyncInfo />
           </>
         )}
       </div>

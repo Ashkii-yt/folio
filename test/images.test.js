@@ -36,7 +36,7 @@ function startMock() {
         if (u.pathname.endsWith('/models')) return json({ data: [{ id: 'm1' }] });
         const sys = JSON.parse(b || '{}').messages?.[0]?.content || '';
         let reply = 'ok';
-        if (sys.startsWith('You write prompts for an AI image')) reply = '"silver braid, weathered face, wool coat"';
+        if (sys.startsWith('You write prompts for an AI image')) reply = '<think>The user wants hair and clothes, so I should list silver braid.</think>\n"silver braid, weathered face, wool coat"';
         if (sys.startsWith('You suggest what the user could say next')) reply = '1. Who are you?\n---\n2. *steps closer* Tell me more.\n---\n3. I should go.';
         res.setHeader('content-type', 'text/event-stream');
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\ndata: [DONE]\n\n`);
@@ -100,6 +100,12 @@ test('AI Horde: submits anonymously, reports queue progress, skips censored imag
   assert.equal(sub.body.nsfw, false);
   assert.equal(sub.body.params.n, 2);
   assert.match(sub.body.prompt, /lighthouse keeper.*anime style.*###/);
+  const [pos, neg] = sub.body.prompt.split(' ### ');
+  assert.match(pos, /^masterpiece/);
+  assert.doesNotMatch(pos, /no text|no watermark/i, 'negatives stay out of the positive prompt');
+  assert.match(neg, /watermark/);
+  assert.deepEqual(sub.body.models, ['Anything Diffusion', 'Dreamshaper']);
+  assert.deepEqual(sub.body.post_processing, ['GFPGAN']);
 });
 
 test('Pollinations: sends the key as a bearer token and explains a missing key', async () => {
@@ -151,4 +157,14 @@ test('suggest a reply: three distinct options, nothing saved', async () => {
   assert.deepEqual(r.body.suggestions, ['Who are you?', '*steps closer* Tell me more.', 'I should go.']);
   assert.equal((await call('GET', `/conversations/${conv.id}`)).body.messages.length, before, 'no message was added');
   assert.equal((await call('POST', '/conversations/nope/suggest-reply', {})).status, 404);
+});
+
+test('model reasoning never reaches prompts: tags split across chunks, closing-only dumps, unfinished blocks', async () => {
+  const { ThinkFilter, stripReasoning } = await import('../server/services/generate.js');
+  const run = (chunks) => { const f = new ThinkFilter(); let o = ''; for (const c of chunks) o += f.push(c); return o + f.flush(); };
+  assert.equal(run(['<thi', 'nk>plan <b>', '</thi', 'nk>\n\nHello <3']), 'Hello <3');
+  assert.equal(run(['<think>never closed']), '');
+  assert.equal(run(['Hi <', 'b> there']), 'Hi <b> there');
+  assert.equal(stripReasoning('reasoning without an opener</think>The answer'), 'The answer');
+  assert.equal(stripReasoning('<Thinking>x</Thinking>A <reasoning>y</reasoning>B'), 'A B');
 });

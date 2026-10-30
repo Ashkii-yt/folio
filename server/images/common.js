@@ -34,7 +34,7 @@ export async function call(url, init = {}, { signal, timeoutMs = 60000, key } = 
     const t = (await res.text()).slice(0, 600);
     try {
       const j = JSON.parse(t);
-      detail = typeof j === 'string' ? j : j.error?.message || j.error || j.message || j.detail || '';
+      detail = typeof j === 'string' ? j : j.error?.message || j.error || j.errors?.[0]?.message || j.message || j.detail || '';
       if (typeof detail !== 'string') detail = JSON.stringify(detail);
     } catch {
       detail = t.replace(/<[^>]+>/g, ' ').trim();

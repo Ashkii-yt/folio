@@ -23,6 +23,8 @@ import { runExtraction, flushExtraction } from '../services/extract.js';
 import { maybeSummarize } from '../services/summarize.js';
 import { generateReply, previewReply, previewPrompt } from '../services/chat.js';
 import { getImageConfig, setImageConfig, generatePortraits, writePortraitPrompt, STYLES } from '../services/images.js';
+import { listPeers } from '../sync/engine.js';
+import { serverIdentity, setServerName, databaseId } from '../identity.js';
 import { suggestReplies } from '../services/suggest.js';
 import { designCharacter } from '../services/designer.js';
 import { listShared, getShared, getSharedAvatar, mySharedMap, publish, unpublish, unpublishShared, addShared } from '../shared.js';
@@ -123,6 +125,12 @@ api.post('/characters/generate', async (req, res) => {
     throw e;
   }
 });
+
+/* ----------------------------------- sync ---------------------------------- */
+
+const publicIdentity = ({ serverId, name }) => ({ serverId, name });
+api.get('/sync/identity', (req, res) => res.json({ ...publicIdentity(serverIdentity()), databaseId: databaseId(), peers: listPeers() }));
+api.put('/sync/identity', (req, res) => res.json(publicIdentity(setServerName(req.body?.name))));
 
 /* -------------------------------- portraits ------------------------------- */
 

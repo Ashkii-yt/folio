@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Brain, Check, Copy, Cpu, MessageSquarePlus, PanelLeft, PanelRight, Pencil, RefreshCw, Send, Sparkles, Square, Trash2, X } from 'lucide-react';
+import { Brain, Check, Copy, Cpu, MessageSquarePlus, PanelLeft, PanelRight, Pencil, RefreshCw, Send, Sparkles, Square, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import { useApp } from '../store.jsx';
 import { api, stream } from '../api.js';
 import { Avatar, ErrorNotice, Spinner, Styled, useConfirm, useToast, usePopover, Empty } from '../ui.jsx';
 import { clock, dayLabel, timeAgo } from '../lib.js';
+import { speak, stopSpeaking, ttsSupported } from '../tts.js';
 import MemoryPanel from '../components/MemoryPanel.jsx';
 
 const booting = new Map(); // characterId -> Promise, so StrictMode's double effect cannot create two chats
@@ -44,6 +45,7 @@ export default function Chat() {
   const [pending, setPending] = useState(null); // streaming reply: { text }
   const [error, setError] = useState(null);
   const [runInfo, setRunInfo] = useState(null); // { provider, model, source } from the latest start event
+  const [speakingId, setSpeakingId] = useState(null);
   const [sugg, setSugg] = useState(null); // { items, loading, error }
   const suggCtl = useRef(null);
   const [editing, setEditing] = useState(null); // { id, text }
@@ -103,7 +105,17 @@ export default function Chat() {
     return () => { alive = false; };
   }, [conversationId, loadConversation]);
 
-  useEffect(() => () => { ctl.current?.abort(); suggCtl.current?.abort(); }, []);
+  useEffect(() => () => { ctl.current?.abort(); suggCtl.current?.abort(); stopSpeaking(); }, []);
+  useEffect(() => { stopSpeaking(); setSpeakingId(null); }, [conversationId]);
+  const toggleSpeak = (m) => {
+    if (speakingId === m.id) { stopSpeaking(); setSpeakingId(null); return; }
+    const started = speak(m.content, {
+      onEnd: () => setSpeakingId((id) => (id === m.id ? null : id)),
+      onError: (e) => { setSpeakingId(null); toast.error(e === 'not-allowed' ? 'Your browser blocked speech. Tap the speaker button again.' : 'Could not read that aloud. Check the voice in Settings → General.'); },
+    });
+    setSpeakingId(started ? m.id : null);
+    if (!started) toast.info('There is nothing to read in that message.');
+  };
 
   /* ---- suggest a reply: ideas for what to say next, written into the box only when you pick one ---- */
   useEffect(() => {
@@ -354,6 +366,8 @@ export default function Chat() {
                     onEditCancel={() => setEditing(null)}
                     onEditSend={() => resend(m, editing.text)}
                     onCopy={() => copy(m.content)}
+                    speaking={speakingId === m.id}
+                    onSpeak={ttsSupported() && m.role === 'character' ? () => toggleSpeak(m) : null}
                     onDelete={() => removeMessage(m)}
                     onRegenerate={regenerate}
                     onOpenConversation={(id) => nav(`/chat/${characterId}/${id}`)}
@@ -458,7 +472,7 @@ export default function Chat() {
 
 /* ------------------------------------------------------------------ pieces */
 
-function Message({ m, character, userName, last, editing, busy, canRegenerate, onEdit, onEditChange, onEditCancel, onEditSend, onCopy, onDelete, onRegenerate, onOpenConversation, memoryOn, showContext }) {
+function Message({ m, character, userName, speaking, onSpeak, last, editing, busy, canRegenerate, onEdit, onEditChange, onEditCancel, onEditSend, onCopy, onDelete, onRegenerate, onOpenConversation, memoryOn, showContext }) {
   const isUser = m.role === 'user';
   const [showCtx, setShowCtx] = useState(false);
   const ctx = m.meta?.context;
@@ -491,6 +505,7 @@ function Message({ m, character, userName, last, editing, busy, canRegenerate, o
         {!editing && !m.temp && (
           <div className="tools">
             <button className="btn ghost icon sm" aria-label="Copy message" title="Copy" onClick={onCopy}><Copy size={14} /></button>
+            {onSpeak && <button className={`btn ghost icon sm ${speaking ? 'on' : ''}`} aria-label={speaking ? 'Stop reading aloud' : 'Read message aloud'} aria-pressed={speaking} title={speaking ? 'Stop' : 'Read aloud'} onClick={onSpeak}>{speaking ? <VolumeX size={14} /> : <Volume2 size={14} />}</button>}
             {isUser && <button className="btn ghost icon sm" aria-label="Edit and resend" title="Edit and resend" onClick={onEdit} disabled={busy}><Pencil size={14} /></button>}
             {canRegenerate && <button className="btn ghost icon sm" aria-label="Regenerate reply" title="Regenerate" onClick={onRegenerate}><RefreshCw size={14} /></button>}
             <button className="btn ghost icon sm" aria-label="Delete message" title="Delete" onClick={onDelete} disabled={busy}><Trash2 size={14} /></button>

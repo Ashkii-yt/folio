@@ -6,26 +6,55 @@ import { assertPublicHttps, call, sleep, sniffMime, toDataUrl } from './common.j
  * anonymous key; a free personal key from aihorde.net gets a better place in the queue.
  */
 const ANON_KEY = '0000000000';
-const NEGATIVE = 'text, watermark, signature, logo, blurry, low quality, deformed, extra fingers, disfigured, nsfw, nude';
+const NEGATIVE = 'lowres, worst quality, low quality, blurry, jpeg artifacts, text, watermark, signature, logo, bad anatomy, deformed, disfigured, extra fingers, extra limbs, cropped, out of frame, nsfw, nude';
+
+/** Checkpoints that draw faces well, tried in order of availability. The person's own model choice overrides this. */
+const MODELS = {
+  illustration: ['Dreamshaper', 'Deliberate'],
+  painterly: ['Deliberate', 'Dreamshaper'],
+  anime: ['Anything Diffusion', 'Dreamshaper'],
+  realistic: ['Realistic Vision', 'Deliberate'],
+  fantasy: ['Dreamshaper', 'Deliberate'],
+  pixel: ['stable_diffusion'],
+  ink: ['Dreamshaper', 'Deliberate'],
+};
 
 export default {
   type: 'horde',
   label: 'AI Horde (free, no sign-up)',
   defaultBaseUrl: 'https://aihorde.net/api/v2',
-  async generate(cfg, { prompt, count, onProgress, signal }) {
+  promptStyle: 'tags',
+  async generate(cfg, { prompt, negative, style, count, onProgress, signal }) {
     const key = cfg.apiKey || ANON_KEY;
     const headers = { apikey: key, 'Client-Agent': 'folio:1:self-hosted', 'content-type': 'application/json' };
     const base = cfg.baseUrl;
-    const body = {
-      prompt: `${prompt} ### ${NEGATIVE}`,
-      params: { width: 512, height: 512, steps: 25, n: count, sampler_name: 'k_euler_a', cfg_scale: 7, karras: true },
+    const base_body = {
+      prompt: `${prompt} ### ${negative || NEGATIVE}`,
+      params: { width: 512, height: 512, steps: 30, n: count, sampler_name: 'k_dpmpp_2m', cfg_scale: 7, karras: true, ...(style === 'anime' ? { clip_skip: 2 } : {}) },
       nsfw: false,
       censor_nsfw: true,
       r2: false,
       slow_workers: true,
-      ...(cfg.model ? { models: [cfg.model] } : {}),
     };
-    const sub = await call(`${base}/generate/async`, { method: 'POST', headers, body: JSON.stringify(body) }, { signal, key });
+    // Best first: a good checkpoint plus face restoration. If the horde refuses an option, fall back to plainer requests.
+    const picks = cfg.model ? [cfg.model] : MODELS[style] || MODELS.illustration;
+    const attempts = [
+      { models: picks, post_processing: ['GFPGAN'] },
+      { models: picks },
+      {},
+    ];
+    let sub = null;
+    let lastErr = null;
+    for (const extra of attempts) {
+      try {
+        sub = await call(`${base}/generate/async`, { method: 'POST', headers, body: JSON.stringify({ ...base_body, ...extra }) }, { signal, key });
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (!(e instanceof ProviderError) || e.code !== 'bad_request') throw e;
+      }
+    }
+    if (!sub) throw lastErr;
     const { id } = await sub.json();
     if (!id) throw new ProviderError('AI Horde did not accept the request.', { code: 'bad_request' });
 

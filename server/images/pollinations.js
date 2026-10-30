@@ -5,6 +5,7 @@ import { call, sniffMime, toDataUrl } from './common.js';
 export default {
   type: 'pollinations',
   label: 'Pollinations',
+  promptStyle: 'natural',
   defaultBaseUrl: 'https://gen.pollinations.ai',
   async generate(cfg, { prompt, count, onProgress, signal }) {
     const out = [];

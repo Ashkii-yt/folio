@@ -9,6 +9,8 @@ import { closeAll } from './accounts.js';
 import { closeShared } from './shared.js';
 import { auth, requireUser } from './routes/auth.js';
 import { VERSION } from './config.js';
+import { serverIdentity } from './identity.js';
+import { startSyncService } from './sync/service.js';
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
@@ -92,8 +94,14 @@ if (isMain) {
   const server = app.listen(PORT, HOST, () => {
     log(`Folio is running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
     log(`Data directory: ${DATA_DIR}`);
+    log(`Server ID: ${serverIdentity().serverId}`);
+    if (process.env.FOLIO_SYNC_SERVICE !== '0') {
+      startSyncService({ log }).then((s) => { syncService = s; }).catch((e) => log(`Server-to-server sync is unavailable: ${e.message}`));
+    }
   });
+  let syncService = null;
   const shutdown = () => {
+    syncService?.stop();
     server.close(() => {
       closeAll();
       closeShared();

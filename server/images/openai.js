@@ -5,6 +5,7 @@ import { assertPublicHttps, call, sniffMime, toDataUrl } from './common.js';
 export default {
   type: 'openai',
   label: 'OpenAI-compatible images API',
+  promptStyle: 'natural',
   defaultBaseUrl: 'https://api.openai.com/v1',
   async generate(cfg, { prompt, count, onProgress, signal }) {
     onProgress?.({ message: 'Drawing…' });

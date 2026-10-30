@@ -36,7 +36,7 @@ test('usernames cannot escape the data folder or collide with reserved names', a
     assert.equal((await post('/auth/register', { username: u, password: 'long enough pw' })).status, 400, JSON.stringify(u));
   }
   assert.equal((await post('/auth/register', { username: 'okname', password: 'short' })).status, 400);
-  assert.deepEqual(fs.readdirSync(DATA).filter((n) => !n.startsWith('.')), [], 'nothing was created');
+  assert.deepEqual(fs.readdirSync(DATA).filter((n) => !n.startsWith('.') && n !== 'server.json'), [], 'no account was created');
 });
 
 test('register creates data/<user>/ with a hashed password, a private key and a database', async () => {

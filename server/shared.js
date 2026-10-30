@@ -36,6 +36,11 @@ function store() {
       UNIQUE (owner, source_id)
     );
     CREATE INDEX IF NOT EXISTS idx_shared_updated ON shared_characters(updated_at DESC);
+    CREATE TABLE IF NOT EXISTS shared_tombstones (id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS shared_tomb AFTER DELETE ON shared_characters
+      BEGIN INSERT OR REPLACE INTO shared_tombstones (id, deleted_at) VALUES (old.id, strftime('%Y-%m-%dT%H:%M:%fZ','now')); END;
+    CREATE TRIGGER IF NOT EXISTS shared_untomb AFTER INSERT ON shared_characters
+      BEGIN DELETE FROM shared_tombstones WHERE id = new.id; END;
   `);
   return db;
 }
@@ -157,4 +162,51 @@ export function addShared(id) {
   const created = createCharacter(clean, { sharedId: r.id, owner: r.owner });
   store().prepare('UPDATE shared_characters SET adds = adds + 1 WHERE id = ?').run(r.id);
   return created;
+}
+
+/* ------------------------------------------------------------------ replication between servers */
+
+const SHARED_COLS = ['id', 'owner', 'source_id', 'name', 'description', 'tags', 'card', 'avatar', 'adds', 'created_at', 'updated_at'];
+
+export function sharedManifest() {
+  const d = store();
+  return {
+    rows: d.prepare('SELECT id, updated_at FROM shared_characters').all().map((r) => [r.id, r.updated_at]),
+    tombstones: d.prepare('SELECT id, deleted_at FROM shared_tombstones').all().map((r) => [r.id, r.deleted_at]),
+  };
+}
+
+export function sharedRows(ids) {
+  const list = (ids || []).slice(0, 100).map(String);
+  if (!list.length) return [];
+  return store().prepare(`SELECT ${SHARED_COLS.join(',')} FROM shared_characters WHERE id IN (${list.map(() => '?').join(',')})`).all(...list);
+}
+
+const str = (v, max) => typeof v === 'string' && v.length <= max;
+
+/** Newer wins per card; a deletion beats an edit only if it came later. Same rules as account data. */
+export function sharedApply({ rows = [], tombstones = [] } = {}) {
+  const d = store();
+  const stats = { added: 0, updated: 0, deleted: 0, skipped: 0 };
+  for (const r of rows) {
+    const ok = r && str(r.id, 40) && /^[A-Za-z0-9_-]+$/.test(r.id) && str(r.owner, 40) && str(r.source_id, 80) && str(r.name, 200) && str(r.description ?? '', 2000) && str(r.tags, 5000) && str(r.card, 200000)
+      && (r.avatar == null || (str(r.avatar, 8_000_000) && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(r.avatar))) && str(r.updated_at, 40) && str(r.created_at, 40);
+    if (!ok) { stats.skipped++; continue; }
+    const cur = d.prepare('SELECT updated_at, adds FROM shared_characters WHERE id = ?').get(r.id);
+    const tomb = d.prepare('SELECT deleted_at FROM shared_tombstones WHERE id = ?').get(r.id);
+    if ((cur && cur.updated_at >= r.updated_at) || (tomb && tomb.deleted_at > r.updated_at)) { stats.skipped++; continue; }
+    const adds = Math.max(cur?.adds || 0, Number.isInteger(r.adds) && r.adds >= 0 ? r.adds : 0);
+    d.prepare('DELETE FROM shared_characters WHERE owner = ? AND source_id = ? AND id != ?').run(r.owner, r.source_id, r.id);
+    d.prepare(`INSERT OR REPLACE INTO shared_characters (${SHARED_COLS.join(',')}) VALUES (${SHARED_COLS.map(() => '?').join(',')})`)
+      .run(r.id, r.owner, r.source_id, r.name, r.description ?? '', r.tags, r.card, r.avatar ?? null, adds, r.created_at, r.updated_at);
+    stats[cur ? 'updated' : 'added']++;
+  }
+  for (const [id, at] of tombstones) {
+    if (!str(id, 40) || !str(at, 40)) { stats.skipped++; continue; }
+    const cur = d.prepare('SELECT updated_at FROM shared_characters WHERE id = ?').get(id);
+    if (cur && cur.updated_at > at) { stats.skipped++; continue; }
+    if (cur) { d.prepare('DELETE FROM shared_characters WHERE id = ?').run(id); stats.deleted++; }
+    d.prepare('INSERT OR REPLACE INTO shared_tombstones (id, deleted_at) VALUES (?,?)').run(id, at);
+  }
+  return stats;
 }

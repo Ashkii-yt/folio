@@ -137,6 +137,7 @@ export default function PortraitDialog({ character, onUse, onClose }) {
           </div>
         )}
         {provider && <p className="hint">{provider.note}</p>}
+        {cfg?.provider === 'horde' && <p className="hint"><b>Want sharper portraits?</b> The free queue draws with older models. <Link to="/settings/portraits" onClick={close}>Switch to Cloudflare</Link> (free daily allowance, FLUX.1) for much better faces.</p>}
       </div>
     </Dialog>
   );

@@ -70,3 +70,45 @@ In the character editor, **Generate portrait** opens a dialog: describe the char
 - **OpenAI-compatible images API**: OpenAI or any server with `POST /images/generations`.
 
 Only the image description goes to the image service, never your chats or memories, and it is sent by the Folio server, not your browser. The services' terms and limits can change; the app was tested against stand-in servers, so use *Save and make a test image* to confirm a service works from your machine.
+
+
+## Read aloud
+
+Under each character message there is a speaker button. It reads the message with a voice built into your browser or phone (nothing is sent anywhere). Pick the voice and speed, and whether to skip the *italic actions*, in **Settings → General → Read aloud**; those choices are saved per device.
+
+## Better portraits
+
+Reasoning models' `<think>` blocks are now removed from everything Folio asks a model to write (portrait prompts, character drafts, suggestions, chat replies). Portrait prompts are built per service: tag-style with a separate negative prompt for AI Horde (with face restoration and face-friendly checkpoints), plain sentences for the others. For clearly better faces, use **Cloudflare Workers AI** (FLUX.1 schnell) in Settings → Portraits: it needs a free Cloudflare account, its account ID and an API token with the Workers AI permission, and has a daily free allowance.
+
+## Syncing servers (whole server, by server ID)
+
+Sync copies **everything** on a server (every account, plus the shared characters) to another Folio server. It is a command-line job; there is no web login involved.
+
+Each server's ID is its public key (`srv_` + 64 hex, shown by `npm run ids` and at startup). `npm start` also runs a small service that joins the HyperDHT network and lets other servers find and connect to it **by ID alone**: no URL, no https, no port forwarding. Connections are hole-punched and end-to-end encrypted, and only the real owner of that key can answer.
+
+```
+npm run pair                               # on server A (keep npm start running): prints a one-time code
+npm run link -- srv_<A's id> abcd-efgh-jkmn  # on server B: pairs. Do the reverse (pair on B, link on A) to allow A to reach B too
+npm run sync  -- srv_<A's id>              # both ways (also: fetch = pull only, push = send only)
+npm run sync  -- srv_<A's id> --every 300  # keep replicating every 5 minutes
+npm run sync  -- <id> --dry-run            # show what would change
+npm run peers / unlink -- <id|name>        # who is paired
+npm run remote -- add home srv_<id>        # then: npm run sync -- home
+```
+
+Accounts that exist on only one side are created on the other with the same login. Newer wins per record; deletions travel. Providers, API keys and settings are never synced. Old random server IDs are replaced by key IDs on first start (the old one is kept as `previousId` in `data/server.json`).
+
+**SSH (same network, no pairing, no running Folio needed):**
+```
+npm run remote -- add pi ssh://user@192.168.1.20/home/user/folio
+npm run sync -- pi
+```
+Uses your system `ssh` (key login, no password prompts) and runs `node server/cli.js stdio` on the other machine, so Folio and its dependencies must be installed there. Your ssh login is the authorisation.
+
+**Things to know**
+- A paired server receives every account's characters, chats and memories. Only pair servers you control. Guard `data/server.json` (it holds the private seed).
+- The DHT reveals your IP address to the peers you connect to and to DHT nodes you talk to.
+- Direct connections can fail behind carrier-grade NAT or strict firewalls; use ssh:// or a VPN such as Tailscale then. This was tested on a local DHT, not over the real internet.
+- Turn the service off with `FOLIO_SYNC_SERVICE=0`.
+- Live sharing of one SQLite file between machines is not possible, so servers replicate instead: run sync on a schedule (`--every`) to make one act like a database for the others.
+- `npm run sync:export` / `sync:import` move one account through a file.

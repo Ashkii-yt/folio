@@ -4,15 +4,30 @@
   "private": true,
   "type": "module",
   "description": "Folio: a character-first AI chat app with durable long-term memory and bring-your-own-model providers.",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --no-warnings --test --test-concurrency=1 test/*.test.js"
+    "test": "node --no-warnings --test --test-concurrency=1 test/*.test.js",
+    "ids": "node --no-warnings server/cli.js ids",
+    "rename": "node --no-warnings server/cli.js rename",
+    "remote": "node --no-warnings server/cli.js remote",
+    "fetch": "node --no-warnings server/cli.js fetch",
+    "push": "node --no-warnings server/cli.js push",
+    "sync": "node --no-warnings server/cli.js sync",
+    "sync:export": "node --no-warnings server/cli.js export",
+    "sync:import": "node --no-warnings server/cli.js import",
+    "pair": "node --no-warnings server/cli.js pair",
+    "link": "node --no-warnings server/cli.js link",
+    "peers": "node --no-warnings server/cli.js peers",
+    "unlink": "node --no-warnings server/cli.js unlink"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "hyperdht": "^6.35.0"
   },
   "devDependencies": {
     "@fontsource-variable/hanken-grotesk": "*",
@@ -23,5 +38,8 @@
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.0",
     "vite": "*"
+  },
+  "bin": {
+    "folio": "server/cli.js"
   }
 }

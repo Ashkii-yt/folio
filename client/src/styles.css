@@ -2061,3 +2061,7 @@ button.chip:hover {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
+
+.msg .tools .btn.on {
+  color: var(--accent);
+}
